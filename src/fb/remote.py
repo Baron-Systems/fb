@@ -73,9 +73,8 @@ class Remote:
             return
 
         # Frappe Manager mode: run bench inside fm-managed environment
-        remote_bench = _validate_fm_bench(self.cfg.remote_bench)
-        inner = f"cd {bench} && bench --site {shlex.quote(site)} backup --with-files"
-        script = f"fm shell {shlex.quote(remote_bench)} -c {shlex.quote(inner)}"
+        inner = f"bench --site {shlex.quote(site)} backup --with-files"
+        script = f"fm shell {shlex.quote(site)} -c {shlex.quote(inner)}"
         self._run(script, dry_run=dry_run, check=True)
 
     def latest_backup_paths(self, site: str, *, dry_run: bool) -> dict[str, Optional[str]]:
@@ -88,7 +87,7 @@ class Remote:
         site = validate_site_name(site)
         bench = shlex.quote(self.cfg.bench_path)
         base = f"sites/{site}/private/backups"
-        if self.cfg.remote_mode == "bench":
+        if self.cfg.remote_mode in ("bench", "fm"):
             # We use ls -1t to find newest matching file for each glob, and prefix with $PWD
             # (since we cd into bench path).
             script = (
@@ -186,9 +185,8 @@ class Remote:
             self._run(script, dry_run=dry_run, check=True)
             return
 
-        remote_bench = _validate_fm_bench(self.cfg.remote_bench)
-        inner = f"cd {bench} && bench --site {shlex.quote(site)} set-maintenance-mode {mode}"
-        script = f"fm shell {shlex.quote(remote_bench)} -c {shlex.quote(inner)}"
+        inner = f"bench --site {shlex.quote(site)} set-maintenance-mode {mode}"
+        script = f"fm shell {shlex.quote(site)} -c {shlex.quote(inner)}"
         self._run(script, dry_run=dry_run, check=True)
 
     def bench_restore(
@@ -243,7 +241,6 @@ class Remote:
             return
 
         # fm mode: delegate restore to fm shell (fm is expected to provide bench environment)
-        remote_bench = _validate_fm_bench(self.cfg.remote_bench)
         cmd = [
             "bench",
             "--site",
@@ -256,8 +253,8 @@ class Remote:
         ]
         if private_files_tar:
             cmd += ["--with-private-files", private_files_tar]
-        inner = f"cd {bench} && {shlex.join(cmd)}"
-        script = f"fm shell {shlex.quote(remote_bench)} -c {shlex.quote(inner)}"
+        inner = shlex.join(cmd)
+        script = f"fm shell {shlex.quote(site)} -c {shlex.quote(inner)}"
         self._run(script, dry_run=dry_run, check=True)
 
 
@@ -272,8 +269,9 @@ def _validate_container(container: Optional[str]) -> str:
 
 
 def _validate_fm_bench(bench: Optional[str]) -> str:
+    # Deprecated (kept for backward compatibility): older fm mode used an explicit bench name.
     if not bench:
-        raise FBError("FRAPPE_REMOTE_BENCH is required for fm mode.", exit_code=2)
+        raise FBError("FRAPPE_REMOTE_BENCH is required for this operation.", exit_code=2)
     allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
     if any(c not in allowed for c in bench) or bench[0] == "-":
         raise FBError("Invalid FRAPPE_REMOTE_BENCH.", exit_code=2)

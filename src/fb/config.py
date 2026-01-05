@@ -93,9 +93,9 @@ class Config:
         if mode == "docker" and not docker_container:
             raise FBError("FRAPPE_DOCKER_CONTAINER is required when FRAPPE_REMOTE_MODE=docker.", exit_code=2)
 
+        # Optional: some fm setups identify benches by name; other setups use site context.
+        # In this repo, fm mode defaults to using the SITE as the fm shell target.
         remote_bench = str(m.get("FRAPPE_REMOTE_BENCH", "")).strip() or None
-        if mode == "fm" and not remote_bench:
-            raise FBError("FRAPPE_REMOTE_BENCH is required when FRAPPE_REMOTE_MODE=fm.", exit_code=2)
 
         token = str(m.get("TELEGRAM_TOKEN", "")).strip() or None
         chat = str(m.get("TELEGRAM_CHAT_ID", "")).strip() or None

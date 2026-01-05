@@ -105,11 +105,11 @@ Tip: to find your container name on the remote host, run `docker ps` and pick th
 If you manage benches via **Frappe Manager (fm)**, set:
 
 - `FRAPPE_REMOTE_MODE=fm`
-- `FRAPPE_REMOTE_BENCH=<bench_name_in_fm>`
+- `FRAPPE_REMOTE_BENCH=<bench_name_in_fm>` (optional; depends on your fm setup)
 
 In this mode `fb` will run bench commands via:
 
-- `fm shell <bench> -c 'bench --site <SITE> ...'`
+- `fm shell <SITE> -c 'bench --site <SITE> ...'`
 
 Notes:
 
