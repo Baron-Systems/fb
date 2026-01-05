@@ -132,13 +132,22 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
     remote_script = "\n".join(
         [
             "set -euo pipefail",
-            f"test -d {shlex.quote(cfg.bench_path)} || {{ echo 'ERR=FRAPPE_BENCH_PATH not found: {cfg.bench_path}' 1>&2; exit 2; }}",
-            # Ensure any fm/bench output does NOT contaminate the tar.gz stream.
-            # Many fm builds print banners/prompts to stdout; redirect fm stdout to stderr.
-            f"{shlex.quote(fm_bin)} shell {shlex.quote(fm_target)} 1>&2 <<'EOF'",
+            # IMPORTANT:
+            # Keep stdout *clean* for the tar.gz stream.
+            # Some fm/bench setups print banners/prompts to stdout even when running non-interactively.
+            # Strategy:
+            # - Redirect stdout -> stderr for all pre-tar steps
+            # - Restore stdout only for the final tar command
+            "exec 3>&1",
+            "exec 1>&2",
+            f"test -d {shlex.quote(cfg.bench_path)} || {{ echo 'ERR=FRAPPE_BENCH_PATH not found: {cfg.bench_path}'; exit 2; }}",
+            f"{shlex.quote(fm_bin)} shell {shlex.quote(fm_target)} <<'EOF'",
             inner_lines,
             "EOF",
-            f"test -d {shlex.quote(backup_dir)} || {{ echo 'ERR=Backup dir not found: {backup_dir}' 1>&2; exit 2; }}",
+            f"test -d {shlex.quote(backup_dir)} || {{ echo 'ERR=Backup dir not found: {backup_dir}'; exit 2; }}",
+            # Restore stdout for the stream.
+            "exec 1>&3",
+            "exec 3>&-",
             f"tar -C {shlex.quote(backup_dir)} -czf - .",
         ]
     )
