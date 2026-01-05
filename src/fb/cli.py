@@ -285,7 +285,7 @@ def _cmd_restore(ctx: Ctx, site: str, date: str, confirm: bool) -> int:
 
 
 def _cmd_export(ctx: Ctx, site: str, date: str, to: str) -> int:
-    """Export a local backup to an external directory."""
+    """Export a local backup to an external directory or remote host."""
     cfg = load_config(profile=ctx.profile)
     parse_date_yyyy_mm_dd(date)
     site = validate_site_name(site)
@@ -296,20 +296,46 @@ def _cmd_export(ctx: Ctx, site: str, date: str, to: str) -> int:
     if not source_dir.exists():
         return _die(FBError(f"Backup not found: {source_dir}", exit_code=1))
     
-    dest_dir = Path(to).expanduser().resolve() / site / date
+    # Check if destination is remote (contains : like user@host:/path)
+    is_remote = ":" in to and not to.startswith("/")
     
-    if ctx.dry_run:
-        print(f"DRY-RUN: would copy {source_dir} -> {dest_dir}")
+    if is_remote:
+        # Use rsync for remote destinations
+        if ctx.dry_run:
+            print(f"DRY-RUN: would rsync {source_dir}/ -> {to}/{site}/{date}/")
+            return 0
+        
+        # Ensure trailing slash for source (rsync convention)
+        import subprocess
+        cmd = [
+            "rsync",
+            "-avz",
+            "--progress",
+            f"{source_dir}/",
+            f"{to}/{site}/{date}/"
+        ]
+        result = subprocess.run(cmd)
+        if result.returncode != 0:
+            return _die(FBError(f"rsync failed with exit code {result.returncode}", exit_code=1))
+        
+        print(f"OK\tExported {site}/{date} to {to}/{site}/{date}/")
         return 0
-    
-    dest_dir.parent.mkdir(parents=True, exist_ok=True)
-    
-    if dest_dir.exists():
-        shutil.rmtree(dest_dir)
-    
-    shutil.copytree(source_dir, dest_dir)
-    print(f"OK\tExported {site}/{date} to {dest_dir}")
-    return 0
+    else:
+        # Use shutil for local destinations
+        dest_dir = Path(to).expanduser().resolve() / site / date
+        
+        if ctx.dry_run:
+            print(f"DRY-RUN: would copy {source_dir} -> {dest_dir}")
+            return 0
+        
+        dest_dir.parent.mkdir(parents=True, exist_ok=True)
+        
+        if dest_dir.exists():
+            shutil.rmtree(dest_dir)
+        
+        shutil.copytree(source_dir, dest_dir)
+        print(f"OK\tExported {site}/{date} to {dest_dir}")
+        return 0
 
 
 def _cmd_status(ctx: Ctx) -> int:

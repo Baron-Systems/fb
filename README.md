@@ -39,7 +39,7 @@ pipx install git+https://github.com/Baron-Systems/fb.git
 
 ```bash
 fb version
-# Should output: 0.7.0
+# Output: 0.7.0
 ```
 
 ---
