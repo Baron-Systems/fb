@@ -132,6 +132,7 @@ Sites registry:
 - `fb backup [--site SITE] [--dry-run]`
 - `fb verify [--site SITE] [--date YYYY-MM-DD] [--dry-run]`
 - `fb restore --site SITE --date YYYY-MM-DD (--confirm | --dry-run)`
+- `fb export --site SITE --date YYYY-MM-DD --to /path/to/dest` (copy local backup to external directory)
 - `fb status`
 - `fb test`
 - `fb version`

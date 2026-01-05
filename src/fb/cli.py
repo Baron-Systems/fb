@@ -25,6 +25,7 @@ from .restore import restore_site
 from .sites import get_site, load_sites, site_add, site_edit, site_remove
 from .utils import FBError, configure_logging, list_date_dirs, parse_date_yyyy_mm_dd, require_bin, validate_site_name
 from .verify import verify_backup_dir
+import shutil
 
 
 @dataclass(frozen=True)
@@ -261,6 +262,33 @@ def _cmd_restore(ctx: Ctx, site: str, date: str, confirm: bool) -> int:
     return 0
 
 
+def _cmd_export(ctx: Ctx, site: str, date: str, to: str) -> int:
+    """Export a local backup to an external directory."""
+    cfg = load_config()
+    parse_date_yyyy_mm_dd(date)
+    site = validate_site_name(site)
+    get_site(site)  # must be configured
+    
+    source_dir = Path(cfg.local_backup_root) / site / date
+    if not source_dir.exists():
+        return _die(FBError(f"Backup not found: {source_dir}", exit_code=1))
+    
+    dest_dir = Path(to).expanduser().resolve() / site / date
+    
+    if ctx.dry_run:
+        print(f"DRY-RUN: would copy {source_dir} -> {dest_dir}")
+        return 0
+    
+    dest_dir.parent.mkdir(parents=True, exist_ok=True)
+    
+    if dest_dir.exists():
+        shutil.rmtree(dest_dir)
+    
+    shutil.copytree(source_dir, dest_dir)
+    print(f"OK\tExported {site}/{date} to {dest_dir}")
+    return 0
+
+
 def _cmd_status(ctx: Ctx) -> int:
     _ = ctx
     cfg = load_config()
@@ -341,6 +369,11 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--date", required=True)
     rs.add_argument("--confirm", action="store_true", help="Required for non-dry-run restore")
 
+    ex = sub.add_parser("export", help="Export a local backup to external directory")
+    ex.add_argument("--site", required=True)
+    ex.add_argument("--date", required=True)
+    ex.add_argument("--to", required=True, help="Destination directory")
+
     sub.add_parser("status", help="Show last run per site")
     sub.add_parser("test", help="Operational readiness test")
     return p
@@ -384,6 +417,8 @@ def run(argv: Optional[list[str]] = None) -> int:
             return _cmd_verify(ctx, args.site, args.date)
         if args.cmd == "restore":
             return _cmd_restore(ctx, args.site, args.date, bool(args.confirm))
+        if args.cmd == "export":
+            return _cmd_export(ctx, args.site, args.date, args.to)
         if args.cmd == "status":
             return _cmd_status(ctx)
         if args.cmd == "test":
