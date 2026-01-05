@@ -135,6 +135,24 @@ def run_pipe(
             pass
 
     if check:
+        # Prefer reporting right-side failure first; it's commonly the root cause (disk/perm/extract errors),
+        # and left side then sees SIGPIPE and exits non-zero.
+        if right.returncode not in (0, None):
+            msg = []
+            if out_r:
+                msg.append("stdout:\n" + out_r.decode(errors="replace").rstrip())
+            if err_r:
+                msg.append("stderr:\n" + err_r.decode(errors="replace").rstrip())
+            # include left stderr for context (often contains remote command output)
+            if err_l:
+                msg.append("left_stderr:\n" + err_l.decode(errors="replace").rstrip())
+            raise FBError(
+                (
+                    f"Pipe right command failed ({right.returncode}): {_shlex.join(argv_right)}\n"
+                    + ("\n".join(msg) if msg else "(no output)")
+                ).rstrip(),
+                exit_code=1,
+            )
         if left.returncode not in (0, None):
             msg = []
             if out_l:
@@ -144,19 +162,6 @@ def run_pipe(
             raise FBError(
                 (
                     f"Pipe left command failed ({left.returncode}): {_shlex.join(argv_left)}\n"
-                    + ("\n".join(msg) if msg else "(no output)")
-                ).rstrip(),
-                exit_code=1,
-            )
-        if right.returncode not in (0, None):
-            msg = []
-            if out_r:
-                msg.append("stdout:\n" + out_r.decode(errors="replace").rstrip())
-            if err_r:
-                msg.append("stderr:\n" + err_r.decode(errors="replace").rstrip())
-            raise FBError(
-                (
-                    f"Pipe right command failed ({right.returncode}): {_shlex.join(argv_right)}\n"
                     + ("\n".join(msg) if msg else "(no output)")
                 ).rstrip(),
                 exit_code=1,
