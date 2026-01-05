@@ -11,7 +11,9 @@ from .remote import Remote
 from .retention import apply_retention
 from .rsync import rsync_pull_files
 from .sites import SiteEntry
-from .utils import FBError, ensure_dir, utc_now_iso, validate_site_name
+import shlex
+
+from .utils import FBError, ensure_dir, require_bin, run_pipe, utc_now_iso, validate_site_name
 
 
 @dataclass(frozen=True)
@@ -46,20 +48,25 @@ def run_backup_for_site(
     pulled_paths: dict[str, Optional[Path]] = {"db": None, "public": None, "private": None}
     try:
         remote.ping(dry_run=dry_run)
-        remote.bench_backup_with_files(site, dry_run=dry_run)
-        artifacts = remote.latest_backup_paths(site, dry_run=dry_run)
+        if cfg.remote_mode == "fm" and getattr(cfg, "fm_transport", "export") == "stream":
+            _fm_stream_backup(cfg, site, dest_dir, dry_run=dry_run)
+            artifacts = {"stage_dir": None, "db": None, "public": None, "private": None}
+        else:
+            remote.bench_backup_with_files(site, dry_run=dry_run)
+            artifacts = remote.latest_backup_paths(site, dry_run=dry_run)
 
-        remote_files = [artifacts["db"], artifacts["public"]]
-        if artifacts.get("private"):
-            remote_files.append(artifacts["private"])
+        if not (cfg.remote_mode == "fm" and getattr(cfg, "fm_transport", "export") == "stream"):
+            remote_files = [artifacts["db"], artifacts["public"]]
+            if artifacts.get("private"):
+                remote_files.append(artifacts["private"])
 
-        # Pull artifacts into date directory.
-        rsync_pull_files(cfg, remote_paths=[p for p in remote_files if p], local_dir=dest_dir, dry_run=dry_run)
+            # Pull artifacts into date directory.
+            rsync_pull_files(cfg, remote_paths=[p for p in remote_files if p], local_dir=dest_dir, dry_run=dry_run)
 
-        # Docker mode stages artifacts onto remote host /tmp; clean up after successful pull.
-        stage_dir = artifacts.get("stage_dir")
-        if stage_dir:
-            remote.rm_rf(stage_dir, dry_run=dry_run)
+            # Docker mode stages artifacts onto remote host /tmp; clean up after successful pull.
+            stage_dir = artifacts.get("stage_dir")
+            if stage_dir:
+                remote.rm_rf(stage_dir, dry_run=dry_run)
 
         if not dry_run:
             pulled_paths["db"] = _pick_file(dest_dir, suffix="database.sql.gz")
@@ -98,6 +105,49 @@ def run_backup_for_site(
         write_last_run(site_root, meta, dry_run=dry_run)
 
     return BackupResult(site=site, date=today, local_dir=dest_dir, pulled=pulled_paths)
+
+
+def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) -> None:
+    """
+    fm transport=stream:
+    ssh user@remote "fm shell SITE -c '<backup + tar -czf - .>'" | tar -xzf - -C <dest_dir>
+    """
+    require_bin("ssh")
+    require_bin("tar")
+    site = validate_site_name(site)
+    dest_dir = dest_dir.resolve()
+    ensure_dir(dest_dir, dry_run=dry_run)
+
+    # remote command exactly as requested (SITE substituted safely).
+    inner = (
+        "set -euo pipefail; "
+        f"bench --site {site} backup --with-files; "
+        f"cd sites/{site}/private/backups; "
+        "tar -czf - ."
+    )
+    remote_script = "set -euo pipefail; " + f"fm shell {shlex.quote(site)} -c {shlex.quote(inner)}"
+
+    ssh_argv = [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "ConnectTimeout=15",
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ServerAliveCountMax=3",
+        "-o",
+        "IdentitiesOnly=yes",
+        f"{cfg.remote_user}@{cfg.remote_host}",
+        "bash",
+        "-lc",
+        remote_script,
+    ]
+    tar_argv = ["tar", "-xzf", "-", "-C", str(dest_dir)]
+    run_pipe(ssh_argv, tar_argv, dry_run=dry_run, check=True)
 
 
 def _pick_file(dest_dir: Path, *, suffix: str) -> Path:

@@ -106,6 +106,7 @@ If you manage benches via **Frappe Manager (fm)**, set:
 
 - `FRAPPE_REMOTE_MODE=fm`
 - `FRAPPE_FM_EXPORT_DIR=/workspace/exports`
+- `FRAPPE_FM_TRANSPORT=export` (default) or `stream`
 
 In this mode `fb` will run bench commands via:
 
@@ -113,7 +114,8 @@ In this mode `fb` will run bench commands via:
 
 Notes:
 
-- In fm mode, `fb` exports the newest backup artifacts to `FRAPPE_FM_EXPORT_DIR/<SITE>/` on the remote host, then pulls from there via `rsync`.
+- In fm mode (transport=export), `fb` exports the newest backup artifacts to `FRAPPE_FM_EXPORT_DIR/<SITE>/` on the remote host, then pulls from there via `rsync`.
+- In fm mode (transport=stream), `fb` streams a tarball over SSH directly into `<LOCAL_ROOT>/<SITE>/<DATE>/` (no rsync for artifacts).
 - `FRAPPE_BENCH_PATH` must still be correct *inside* the `fm shell` environment so it can `cd` and locate `sites/<SITE>/private/backups/`.
 
 Sites registry:

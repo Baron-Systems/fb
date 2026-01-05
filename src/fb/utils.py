@@ -103,6 +103,52 @@ def run_cmd(
     return CmdResult(argv=argv, stdout=out, stderr=err, returncode=proc.returncode)
 
 
+def run_pipe(
+    argv_left: list[str],
+    argv_right: list[str],
+    *,
+    dry_run: bool,
+    check: bool = True,
+) -> int:
+    """
+    Run `argv_left | argv_right` with streaming pipes.
+    Returns right process exit code.
+    """
+    import shlex as _shlex
+
+    if dry_run:
+        LOG.info("DRY-RUN %s | %s", _shlex.join(argv_left), _shlex.join(argv_right))
+        return 0
+
+    LOG.debug("pipe: %s | %s", _shlex.join(argv_left), _shlex.join(argv_right))
+    left = subprocess.Popen(argv_left, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
+    try:
+        right = subprocess.Popen(argv_right, stdin=left.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
+        assert left.stdout is not None
+        left.stdout.close()  # allow left to receive SIGPIPE if right exits
+        out_r, err_r = right.communicate()
+        out_l, err_l = left.communicate()
+    finally:
+        try:
+            left.kill()
+        except Exception:
+            pass
+
+    if check:
+        if left.returncode not in (0, None):
+            raise FBError(
+                f"Pipe left command failed ({left.returncode}): {_shlex.join(argv_left)}\n{(err_l or b'').decode(errors='replace')}".rstrip(),
+                exit_code=1,
+            )
+        if right.returncode not in (0, None):
+            raise FBError(
+                f"Pipe right command failed ({right.returncode}): {_shlex.join(argv_right)}\n{(err_r or b'').decode(errors='replace')}".rstrip(),
+                exit_code=1,
+            )
+
+    return int(right.returncode or 0)
+
+
 def require_bin(name: str) -> None:
     from shutil import which
 
