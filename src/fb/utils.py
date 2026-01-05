@@ -109,6 +109,7 @@ def run_pipe(
     *,
     dry_run: bool,
     check: bool = True,
+    stdin_left: Optional[bytes] = None,
 ) -> int:
     """
     Run `argv_left | argv_right` with streaming pipes.
@@ -121,11 +122,21 @@ def run_pipe(
         return 0
 
     LOG.debug("pipe: %s | %s", _shlex.join(argv_left), _shlex.join(argv_right))
-    left = subprocess.Popen(argv_left, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
+    left = subprocess.Popen(
+        argv_left,
+        stdin=subprocess.PIPE if stdin_left is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=False,
+    )
     try:
         right = subprocess.Popen(argv_right, stdin=left.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
         assert left.stdout is not None
         left.stdout.close()  # allow left to receive SIGPIPE if right exits
+        if stdin_left is not None:
+            assert left.stdin is not None
+            left.stdin.write(stdin_left)
+            left.stdin.close()
         out_r, err_r = right.communicate()
         out_l, err_l = left.communicate()
     finally:

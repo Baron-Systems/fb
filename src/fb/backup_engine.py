@@ -162,6 +162,7 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
         ]
     )
 
+    # Use "bash -s" and feed the script via stdin. This avoids ssh remote-quote issues that can corrupt streams.
     ssh_argv = [
         "ssh",
         "-T",
@@ -181,11 +182,10 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
         "bash",
         "--noprofile",
         "--norc",
-        "-c",
-        remote_script,
+        "-s",
     ]
     tar_argv = ["tar", "-xzf", "-", "-C", str(dest_dir)]
-    run_pipe(ssh_argv, tar_argv, dry_run=dry_run, check=True)
+    run_pipe(ssh_argv, tar_argv, dry_run=dry_run, check=True, stdin_left=(remote_script + "\n").encode("utf-8"))
 
 
 def _pick_file(dest_dir: Path, *, suffix: str) -> Path:
