@@ -124,10 +124,21 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
     # - keeping stdout redirected to stderr for the whole remote script
     # - opening FD 3 as the original stdout
     # - writing tar output to /proc/self/fd/3 from inside the fm shell
+    bench_candidates = [
+        cfg.bench_path,
+        "/workspace/frappe-bench",
+        "/home/frappe/frappe-bench",
+    ]
+    bench_list = " ".join([shlex.quote(p) for p in bench_candidates])
     inner_lines = "\n".join(
         [
             "set -euo pipefail",
-            f"cd {shlex.quote(cfg.bench_path)}",
+            "bench_root=''",
+            f"for p in {bench_list}; do",
+            '  if [ -d "$p" ] && [ -d "$p/sites" ]; then bench_root="$p"; break; fi',
+            "done",
+            'if [ -z "$bench_root" ]; then echo "ERR=Cannot find bench root inside fm shell. Set FRAPPE_BENCH_PATH to the bench root visible inside fm." 1>&2; exit 2; fi',
+            'cd "$bench_root"',
             f"bench --site {site} backup --with-files",
             f"cd sites/{site}/private/backups",
             # Write the stream to FD 3 explicitly to avoid any stdout contamination.
@@ -141,7 +152,6 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
             "set -euo pipefail",
             "exec 3>&1",
             "exec 1>&2",
-            f"test -d {shlex.quote(cfg.bench_path)} || {{ echo 'ERR=FRAPPE_BENCH_PATH not found: {cfg.bench_path}'; exit 2; }}",
             # Redirect all fm/bench output to stderr; tar writes to FD 3 explicitly.
             f"{shlex.quote(fm_bin)} shell {shlex.quote(fm_target)} <<'FMEOF' 1>&2",
             inner_lines,

@@ -112,11 +112,22 @@ class Remote:
 
             # Use heredoc stdin execution because many fm builds do NOT accept extra args.
             # Also allows a reliable multiline script.
+            bench_candidates = [
+                self.cfg.bench_path,
+                "/workspace/frappe-bench",
+                "/home/frappe/frappe-bench",
+            ]
+            bench_list = " ".join([shlex.quote(p) for p in bench_candidates])
             inner_lines = "\n".join(
                 [
                     "set -euo pipefail",
                     f"bench --site {site} backup --with-files",
-                    f"cd {bench}",
+                    "bench_root=''",
+                    f"for p in {bench_list}; do",
+                    '  if [ -d "$p" ] && [ -d "$p/sites" ]; then bench_root="$p"; break; fi',
+                    "done",
+                    'if [ -z "$bench_root" ]; then echo "ERR=Cannot find bench root inside fm shell. Set FRAPPE_BENCH_PATH to the bench root visible inside fm." 1>&2; exit 2; fi',
+                    'cd "$bench_root"',
                     f"bdir={shlex.quote(base)}",
                     'db=$(ls -1t "$bdir"/*_database.sql.gz 2>/dev/null | head -n1 || true)',
                     'pub=$(ls -1t "$bdir"/*_files.tar 2>/dev/null | head -n1 || true)',
@@ -231,9 +242,21 @@ class Remote:
 
         fm_bin = _validate_abs_dir(self.cfg.fm_bin, "FRAPPE_FM_BIN")
         fm_target = _validate_fm_target(self.cfg.remote_bench or site)
+        bench_candidates = [
+            self.cfg.bench_path,
+            "/workspace/frappe-bench",
+            "/home/frappe/frappe-bench",
+        ]
+        bench_list = " ".join([shlex.quote(p) for p in bench_candidates])
         inner_lines = "\n".join(
             [
                 "set -euo pipefail",
+                "bench_root=''",
+                f"for p in {bench_list}; do",
+                '  if [ -d "$p" ] && [ -d "$p/sites" ]; then bench_root="$p"; break; fi',
+                "done",
+                'if [ -z "$bench_root" ]; then echo "ERR=Cannot find bench root inside fm shell. Set FRAPPE_BENCH_PATH to the bench root visible inside fm." 1>&2; exit 2; fi',
+                'cd "$bench_root"',
                 f"bench --site {site} set-maintenance-mode {mode}",
             ]
         )
@@ -301,6 +324,12 @@ class Remote:
         # fm mode: delegate restore to fm shell (fm is expected to provide bench environment)
         fm_bin = _validate_abs_dir(self.cfg.fm_bin, "FRAPPE_FM_BIN")
         fm_target = _validate_fm_target(self.cfg.remote_bench or site)
+        bench_candidates = [
+            self.cfg.bench_path,
+            "/workspace/frappe-bench",
+            "/home/frappe/frappe-bench",
+        ]
+        bench_list = " ".join([shlex.quote(p) for p in bench_candidates])
         cmd = [
             "bench",
             "--site",
@@ -316,6 +345,12 @@ class Remote:
         inner_lines = "\n".join(
             [
                 "set -euo pipefail",
+                "bench_root=''",
+                f"for p in {bench_list}; do",
+                '  if [ -d "$p" ] && [ -d "$p/sites" ]; then bench_root="$p"; break; fi',
+                "done",
+                'if [ -z "$bench_root" ]; then echo "ERR=Cannot find bench root inside fm shell. Set FRAPPE_BENCH_PATH to the bench root visible inside fm." 1>&2; exit 2; fi',
+                'cd "$bench_root"',
                 shlex.join(cmd),
             ]
         )
