@@ -125,7 +125,9 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
         f"cd sites/{site}/private/backups; "
         "tar -czf - ."
     )
-    remote_script = "set -euo pipefail; " + f"fm shell {shlex.quote(site)} -c {shlex.quote(inner)}"
+    fm_bin = getattr(cfg, "fm_bin", "/home/baron/.local/bin/fm")
+    # cfg.fm_bin is an absolute path on the remote host; quote it into the ssh remote script.
+    remote_script = "set -euo pipefail; " + f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -c {shlex.quote(inner)}"
 
     ssh_argv = [
         "ssh",

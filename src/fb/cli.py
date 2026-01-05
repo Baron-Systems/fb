@@ -66,6 +66,7 @@ def _cmd_init(ctx: Ctx) -> int:
             "# FRAPPE_REMOTE_BENCH = \"\"  # required if FRAPPE_REMOTE_MODE=fm\n"
             "# FRAPPE_FM_EXPORT_DIR = \"/workspace/exports\"  # required if FRAPPE_REMOTE_MODE=fm\n"
             "# FRAPPE_FM_TRANSPORT = \"export\"  # export|stream (default export)\n"
+            "# FRAPPE_FM_BIN = \"/home/baron/.local/bin/fm\"  # fm binary path on remote host\n"
             "# TELEGRAM_TOKEN = \"\"\n"
             "# TELEGRAM_CHAT_ID = \"\"\n"
         )
@@ -289,7 +290,7 @@ def _cmd_test(ctx: Ctx) -> int:
         r.require_remote_bin("docker", dry_run=False)
     if cfg.remote_mode == "fm" and not ctx.dry_run:
         # Best-effort remote check that fm is available.
-        r.require_remote_bin("fm", dry_run=False)
+        r.require_remote_bin(cfg.fm_bin, dry_run=False)
     print("OK")
     return 0
 

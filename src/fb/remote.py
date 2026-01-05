@@ -50,7 +50,11 @@ class Remote:
         """
         if not name or any(c.isspace() for c in name):
             raise FBError("Invalid binary name.", exit_code=2)
-        self._run(f"command -v {shlex.quote(name)} >/dev/null 2>&1", dry_run=dry_run, check=True)
+        # Allow absolute paths (e.g. /home/user/.local/bin/fm)
+        if "/" in name:
+            self._run(f"test -x {shlex.quote(name)}", dry_run=dry_run, check=True)
+        else:
+            self._run(f"command -v {shlex.quote(name)} >/dev/null 2>&1", dry_run=dry_run, check=True)
 
     def ping(self, *, dry_run: bool) -> None:
         self._run("true", dry_run=dry_run, check=True)
@@ -103,6 +107,7 @@ class Remote:
         elif self.cfg.remote_mode == "fm":
             export_root = _validate_abs_dir(self.cfg.fm_export_dir, "FRAPPE_FM_EXPORT_DIR")
             export_site = f"{export_root.rstrip('/')}/{site}"
+            fm_bin = _validate_abs_dir(self.cfg.fm_bin, "FRAPPE_FM_BIN")
 
             # Single fm shell command: run backup, find newest artifacts, copy them to export dir.
             inner = (
@@ -125,7 +130,7 @@ class Remote:
                 f"printf 'DB={shlex.quote(export_site)}/%s\\nPUB={shlex.quote(export_site)}/%s\\nPRIV={shlex.quote(export_site)}/%s\\n' "
                 "\"$dbb\" \"$pubb\" \"$privb\""
             )
-            script = f"fm shell {shlex.quote(site)} -c {shlex.quote(inner)}"
+            script = f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -c {shlex.quote(inner)}"
         else:
             container = _validate_container(self.cfg.docker_container)
             # Discover newest artifacts inside container, then stage them onto the host /tmp
@@ -211,8 +216,9 @@ class Remote:
             self._run(script, dry_run=dry_run, check=True)
             return
 
+        fm_bin = _validate_abs_dir(self.cfg.fm_bin, "FRAPPE_FM_BIN")
         inner = f"bench --site {shlex.quote(site)} set-maintenance-mode {mode}"
-        script = f"fm shell {shlex.quote(site)} -c {shlex.quote(inner)}"
+        script = f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -c {shlex.quote(inner)}"
         self._run(script, dry_run=dry_run, check=True)
 
     def bench_restore(
@@ -267,6 +273,7 @@ class Remote:
             return
 
         # fm mode: delegate restore to fm shell (fm is expected to provide bench environment)
+        fm_bin = _validate_abs_dir(self.cfg.fm_bin, "FRAPPE_FM_BIN")
         cmd = [
             "bench",
             "--site",
@@ -280,7 +287,7 @@ class Remote:
         if private_files_tar:
             cmd += ["--with-private-files", private_files_tar]
         inner = shlex.join(cmd)
-        script = f"fm shell {shlex.quote(site)} -c {shlex.quote(inner)}"
+        script = f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -c {shlex.quote(inner)}"
         self._run(script, dry_run=dry_run, check=True)
 
 

@@ -23,6 +23,7 @@ CONFIG_ENV_KEYS = [
     "FRAPPE_REMOTE_BENCH",
     "FRAPPE_FM_EXPORT_DIR",
     "FRAPPE_FM_TRANSPORT",
+    "FRAPPE_FM_BIN",
     "TELEGRAM_TOKEN",
     "TELEGRAM_CHAT_ID",
 ]
@@ -71,6 +72,7 @@ class Config:
     remote_bench: Optional[str] = None
     fm_export_dir: Optional[str] = None
     fm_transport: str = "export"
+    fm_bin: str = "/home/baron/.local/bin/fm"
     telegram_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
 
@@ -103,9 +105,11 @@ class Config:
 
         fm_export_dir = str(m.get("FRAPPE_FM_EXPORT_DIR", "")).strip() or None
         fm_transport = str(m.get("FRAPPE_FM_TRANSPORT", "export")).strip().lower() or "export"
+        fm_bin = str(m.get("FRAPPE_FM_BIN", "/home/baron/.local/bin/fm")).strip() or "/home/baron/.local/bin/fm"
         if mode == "fm":
             if fm_transport not in ("export", "stream"):
                 raise FBError("FRAPPE_FM_TRANSPORT must be 'export' or 'stream'.", exit_code=2)
+            fm_bin = _safe_abs_path(fm_bin, "FRAPPE_FM_BIN")
             if fm_transport == "export":
                 if not fm_export_dir:
                     raise FBError("FRAPPE_FM_EXPORT_DIR is required when FRAPPE_REMOTE_MODE=fm and transport=export.", exit_code=2)
@@ -127,6 +131,7 @@ class Config:
             remote_bench=remote_bench,
             fm_export_dir=fm_export_dir,
             fm_transport=fm_transport,
+            fm_bin=fm_bin,
             telegram_token=token,
             telegram_chat_id=chat,
         )
@@ -146,6 +151,7 @@ class Config:
         if self.fm_export_dir:
             out["FRAPPE_FM_EXPORT_DIR"] = self.fm_export_dir
         out["FRAPPE_FM_TRANSPORT"] = self.fm_transport
+        out["FRAPPE_FM_BIN"] = self.fm_bin
         if self.telegram_token:
             out["TELEGRAM_TOKEN"] = redact_secret(self.telegram_token) if redact else self.telegram_token
         if self.telegram_chat_id:

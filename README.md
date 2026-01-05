@@ -107,6 +107,7 @@ If you manage benches via **Frappe Manager (fm)**, set:
 - `FRAPPE_REMOTE_MODE=fm`
 - `FRAPPE_FM_EXPORT_DIR=/workspace/exports`
 - `FRAPPE_FM_TRANSPORT=export` (default) or `stream`
+- `FRAPPE_FM_BIN=/home/baron/.local/bin/fm`
 
 In this mode `fb` will run bench commands via:
 
