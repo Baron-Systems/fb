@@ -159,13 +159,124 @@ class Config:
         return out
 
 
-def load_config(config_path: Optional[Path] = None) -> Config:
+# ============================================================================
+# Multi-Profile Support
+# ============================================================================
+
+
+def get_profiles_dir() -> Path:
+    """Return the profiles directory: ~/.config/fb/profiles/"""
+    return default_config_dir() / "profiles"
+
+
+def get_default_profile_file() -> Path:
+    """Return path to file storing the default profile name."""
+    return default_config_dir() / "default_profile"
+
+
+def list_profiles() -> list[str]:
+    """List all available profile names."""
+    profiles_dir = get_profiles_dir()
+    if not profiles_dir.exists():
+        return []
+    return sorted([p.name for p in profiles_dir.iterdir() if p.is_dir()])
+
+
+def get_profile_dir(profile_name: str) -> Path:
+    """Return the directory for a specific profile."""
+    if not profile_name or "/" in profile_name or profile_name.startswith("."):
+        raise FBError(f"Invalid profile name: {profile_name}", exit_code=2)
+    return get_profiles_dir() / profile_name
+
+
+def get_profile_config_path(profile_name: str) -> Path:
+    """Return config.toml path for a profile."""
+    return get_profile_dir(profile_name) / "config.toml"
+
+
+def get_profile_sites_path(profile_name: str) -> Path:
+    """Return sites.conf path for a profile."""
+    return get_profile_dir(profile_name) / "sites.conf"
+
+
+def profile_exists(profile_name: str) -> bool:
+    """Check if a profile exists."""
+    return get_profile_dir(profile_name).exists()
+
+
+def get_default_profile() -> Optional[str]:
+    """Get the default profile name (from default_profile file or None)."""
+    default_file = get_default_profile_file()
+    if default_file.exists():
+        return default_file.read_text().strip() or None
+    return None
+
+
+def set_default_profile(profile_name: str) -> None:
+    """Set the default profile."""
+    if not profile_exists(profile_name):
+        raise FBError(f"Profile does not exist: {profile_name}", exit_code=1)
+    atomic_write_text(get_default_profile_file(), profile_name + "\n")
+
+
+def create_profile(profile_name: str, **config_values: Any) -> None:
+    """Create a new profile with given config."""
+    if profile_exists(profile_name):
+        raise FBError(f"Profile already exists: {profile_name}", exit_code=1)
+    
+    profile_dir = get_profile_dir(profile_name)
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Write config.toml
+    config_path = get_profile_config_path(profile_name)
+    lines = []
+    for key, value in sorted(config_values.items()):
+        if value is not None:
+            lines.append(f'{key} = "{value}"\n')
+    atomic_write_text(config_path, "".join(lines))
+    
+    # Create empty sites.conf
+    sites_path = get_profile_sites_path(profile_name)
+    atomic_write_text(sites_path, "")
+
+
+def delete_profile(profile_name: str) -> None:
+    """Delete a profile."""
+    if not profile_exists(profile_name):
+        raise FBError(f"Profile does not exist: {profile_name}", exit_code=1)
+    
+    import shutil
+    profile_dir = get_profile_dir(profile_name)
+    shutil.rmtree(profile_dir)
+    
+    # If it was the default, clear default
+    if get_default_profile() == profile_name:
+        default_file = get_default_profile_file()
+        if default_file.exists():
+            default_file.unlink()
+
+
+def load_config(config_path: Optional[Path] = None, profile: Optional[str] = None) -> Config:
     """
+    Load configuration from environment and/or config file.
+    
+    If profile is specified:
+    - Use ~/.config/fb/profiles/<profile>/config.toml
+    
+    Otherwise:
+    - Use config_path or default_config_path()
+    
     Precedence:
     1) Environment variables (FRAPPE_*, TELEGRAM_*)
     2) config.toml (same keys)
     """
-    config_path = config_path or default_config_path()
+    if profile:
+        if not profile_exists(profile):
+            raise FBError(f"Profile does not exist: {profile}", exit_code=1)
+        config_path = get_profile_config_path(profile)
+    else:
+        config_path = config_path or default_config_path()
+    
     file_values: dict[str, Any] = {}
     if config_path.exists():
         try:

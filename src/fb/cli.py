@@ -4,7 +4,7 @@ import argparse
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from . import __version__
 from .backup_engine import run_backup_for_site
@@ -12,11 +12,19 @@ from .config import (
     CONFIG_ENV_KEYS,
     config_set,
     config_unset,
+    create_profile,
+    delete_profile,
     default_config_dir,
     default_config_path,
     default_sites_path,
+    get_default_profile,
+    get_profile_config_path,
+    get_profile_sites_path,
+    list_profiles,
     load_config,
+    profile_exists,
     read_config_file,
+    set_default_profile,
 )
 from .metadata import read_last_run
 from .notifications import telegram_send
@@ -32,6 +40,7 @@ import shutil
 class Ctx:
     dry_run: bool
     verbose: bool
+    profile: Optional[str] = None
 
 
 def _print_err(msg: str) -> None:
@@ -90,8 +99,8 @@ def _cmd_init(ctx: Ctx) -> int:
 
 
 def _cmd_list(ctx: Ctx) -> int:
-    _ = ctx
-    entries = load_sites()
+    sites_path = get_profile_sites_path(ctx.profile) if ctx.profile else None
+    entries = load_sites(sites_path)
     if not entries:
         print("(no sites configured)")
         return 0
@@ -108,7 +117,8 @@ def _cmd_site_add(ctx: Ctx, site: str, retention: int) -> int:
     if ctx.dry_run:
         print(f"DRY-RUN: would add {site} retention={retention}")
         return 0
-    site_add(site, retention)
+    sites_path = get_profile_sites_path(ctx.profile) if ctx.profile else None
+    site_add(site, retention, sites_path=sites_path)
     print(f"Added {site} retention={retention}")
     return 0
 
@@ -118,7 +128,8 @@ def _cmd_site_remove(ctx: Ctx, site: str) -> int:
     if ctx.dry_run:
         print(f"DRY-RUN: would remove {site}")
         return 0
-    site_remove(site)
+    sites_path = get_profile_sites_path(ctx.profile) if ctx.profile else None
+    site_remove(site, sites_path=sites_path)
     print(f"Removed {site}")
     return 0
 
@@ -130,14 +141,15 @@ def _cmd_site_edit(ctx: Ctx, site: str, retention: int) -> int:
     if ctx.dry_run:
         print(f"DRY-RUN: would edit {site} retention={retention}")
         return 0
-    site_edit(site, retention)
+    sites_path = get_profile_sites_path(ctx.profile) if ctx.profile else None
+    site_edit(site, retention, sites_path=sites_path)
     print(f"Updated {site} retention={retention}")
     return 0
 
 
 def _cmd_config_show(ctx: Ctx) -> int:
     _ = ctx
-    cfg = load_config()
+    cfg = load_config(profile=ctx.profile)
     print("KEY\tVALUE")
     for k, v in cfg.as_env_mapping(redact=True).items():
         print(f"{k}\t{v}")
@@ -146,7 +158,7 @@ def _cmd_config_show(ctx: Ctx) -> int:
 
 def _cmd_config_check(ctx: Ctx) -> int:
     _ = ctx
-    cfg = load_config()
+    cfg = load_config(profile=ctx.profile)
     for b in ["ssh", "rsync", "tar", "gzip"]:
         require_bin(b)
     if cfg.remote_mode == "docker":
@@ -197,10 +209,11 @@ def _cmd_config_unset(ctx: Ctx, key: str) -> int:
 
 
 def _cmd_backup(ctx: Ctx, site: Optional[str]) -> int:
-    cfg = load_config()
-    entries = load_sites()
+    cfg = load_config(profile=ctx.profile)
+    sites_path = get_profile_sites_path(ctx.profile) if ctx.profile else None
+    entries = load_sites(sites_path)
     if site:
-        entries = [get_site(site)]
+        entries = [get_site(site, sites_path=sites_path)]
     if not entries:
         return _die(FBError("No sites configured. Use: fb site add SITE RETENTION", exit_code=2))
 
@@ -221,10 +234,11 @@ def _cmd_backup(ctx: Ctx, site: Optional[str]) -> int:
 
 
 def _cmd_verify(ctx: Ctx, site: Optional[str], date: Optional[str]) -> int:
-    cfg = load_config()
-    entries = load_sites()
+    cfg = load_config(profile=ctx.profile)
+    sites_path = get_profile_sites_path(ctx.profile) if ctx.profile else None
+    entries = load_sites(sites_path)
     if site:
-        entries = [get_site(site)]
+        entries = [get_site(site, sites_path=sites_path)]
     if not entries:
         return _die(FBError("No sites configured.", exit_code=2))
 
@@ -252,10 +266,11 @@ def _cmd_verify(ctx: Ctx, site: Optional[str], date: Optional[str]) -> int:
 
 
 def _cmd_restore(ctx: Ctx, site: str, date: str, confirm: bool) -> int:
-    cfg = load_config()
+    cfg = load_config(profile=ctx.profile)
     parse_date_yyyy_mm_dd(date)
     site = validate_site_name(site)
-    get_site(site)  # must be configured
+    sites_path = get_profile_sites_path(ctx.profile) if ctx.profile else None
+    get_site(site, sites_path=sites_path)  # must be configured
     local_dir = Path(cfg.local_backup_root) / site / date
     r = restore_site(cfg, site=site, date=date, local_backup_dir=local_dir, confirm=confirm, dry_run=ctx.dry_run)
     print(f"OK\t{r.site}\t{r.date}\t{r.message}")
@@ -264,10 +279,11 @@ def _cmd_restore(ctx: Ctx, site: str, date: str, confirm: bool) -> int:
 
 def _cmd_export(ctx: Ctx, site: str, date: str, to: str) -> int:
     """Export a local backup to an external directory."""
-    cfg = load_config()
+    cfg = load_config(profile=ctx.profile)
     parse_date_yyyy_mm_dd(date)
     site = validate_site_name(site)
-    get_site(site)  # must be configured
+    sites_path = get_profile_sites_path(ctx.profile) if ctx.profile else None
+    get_site(site, sites_path=sites_path)  # must be configured
     
     source_dir = Path(cfg.local_backup_root) / site / date
     if not source_dir.exists():
@@ -290,9 +306,9 @@ def _cmd_export(ctx: Ctx, site: str, date: str, to: str) -> int:
 
 
 def _cmd_status(ctx: Ctx) -> int:
-    _ = ctx
-    cfg = load_config()
-    entries = load_sites()
+    cfg = load_config(profile=ctx.profile)
+    sites_path = get_profile_sites_path(ctx.profile) if ctx.profile else None
+    entries = load_sites(sites_path)
     if not entries:
         return _die(FBError("No sites configured.", exit_code=2))
     print("SITE\tLAST_DATE\tSTATUS\tMESSAGE")
@@ -307,8 +323,113 @@ def _cmd_status(ctx: Ctx) -> int:
     return 0
 
 
+def _cmd_profile_create(ctx: Ctx, name: str, host: str, bench_path: str, **kwargs: Any) -> int:
+    """Create a new profile."""
+    if ctx.dry_run:
+        print(f"DRY-RUN: would create profile '{name}'")
+        return 0
+    
+    config_values = {
+        "FRAPPE_REMOTE_HOST": host,
+        "FRAPPE_BENCH_PATH": bench_path,
+    }
+    # Add optional values if provided
+    for key, value in kwargs.items():
+        if value:
+            config_values[key] = value
+    
+    create_profile(name, **config_values)
+    print(f"Created profile: {name}")
+    
+    # Set as default if it's the first profile
+    profiles = list_profiles()
+    if len(profiles) == 1:
+        set_default_profile(name)
+        print(f"Set as default profile")
+    
+    return 0
+
+
+def _cmd_profile_list(ctx: Ctx) -> int:
+    """List all profiles."""
+    _ = ctx
+    profiles = list_profiles()
+    if not profiles:
+        print("No profiles configured.")
+        return 0
+    
+    default = get_default_profile()
+    print("PROFILE\tDEFAULT")
+    for p in profiles:
+        marker = " *" if p == default else ""
+        print(f"{p}{marker}")
+    return 0
+
+
+def _cmd_profile_delete(ctx: Ctx, name: str) -> int:
+    """Delete a profile."""
+    if ctx.dry_run:
+        print(f"DRY-RUN: would delete profile '{name}'")
+        return 0
+    
+    delete_profile(name)
+    print(f"Deleted profile: {name}")
+    return 0
+
+
+def _cmd_profile_show(ctx: Ctx, name: str) -> int:
+    """Show profile details."""
+    _ = ctx
+    if not profile_exists(name):
+        return _die(FBError(f"Profile does not exist: {name}", exit_code=1))
+    
+    config_path = get_profile_config_path(name)
+    sites_path = get_profile_sites_path(name)
+    
+    print(f"Profile: {name}")
+    print(f"Config: {config_path}")
+    print(f"Sites: {sites_path}")
+    print()
+    
+    # Show config
+    if config_path.exists():
+        cfg_data = read_config_file(config_path)
+        print("Configuration:")
+        for key in sorted(cfg_data.keys()):
+            value = cfg_data[key]
+            if "TOKEN" in key.upper() or "PASSWORD" in key.upper():
+                value = "***REDACTED***"
+            print(f"  {key} = {value}")
+    else:
+        print("Configuration: (empty)")
+    
+    print()
+    
+    # Show sites
+    sites = load_sites(sites_path)
+    if sites:
+        print(f"Sites ({len(sites)}):")
+        for s in sites:
+            print(f"  {s.site}\t{s.retention_days} days")
+    else:
+        print("Sites: (none)")
+    
+    return 0
+
+
+def _cmd_profile_set_default(ctx: Ctx, name: str) -> int:
+    """Set default profile."""
+    if ctx.dry_run:
+        print(f"DRY-RUN: would set default profile to '{name}'")
+        return 0
+    
+    set_default_profile(name)
+    print(f"Default profile set to: {name}")
+    return 0
+
+
 def _cmd_test(ctx: Ctx) -> int:
-    cfg = load_config()
+    cfg = load_config(profile=ctx.profile)
     for b in ["ssh", "rsync", "tar", "gzip"]:
         require_bin(b)
     r = Remote(cfg)
@@ -327,6 +448,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="fb", description="Frappe Backup (fb) - pull-based backups over SSH+rsync")
     p.add_argument("--dry-run", action="store_true", help="Print what would happen; execute nothing")
     p.add_argument("--verbose", action="store_true", help="Enable debug logging")
+    p.add_argument("--profile", default=None, help="Use specific profile (overrides default)")
 
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -357,6 +479,33 @@ def build_parser() -> argparse.ArgumentParser:
     u = sub_cfg.add_parser("unset", help="Unset key in config file")
     u.add_argument("key")
 
+    p_prof = sub.add_parser("profile", help="Manage profiles (multi-bench/server support)")
+    sub_prof = p_prof.add_subparsers(dest="prof_cmd", required=True)
+    
+    pc = sub_prof.add_parser("create", help="Create a new profile")
+    pc.add_argument("name", help="Profile name")
+    pc.add_argument("--host", required=True, help="FRAPPE_REMOTE_HOST")
+    pc.add_argument("--bench-path", required=True, help="FRAPPE_BENCH_PATH")
+    pc.add_argument("--user", default="frappe", help="FRAPPE_REMOTE_USER (default: frappe)")
+    pc.add_argument("--mode", choices=["bench", "docker", "fm"], default="bench", help="FRAPPE_REMOTE_MODE")
+    pc.add_argument("--local-backup-root", help="FRAPPE_LOCAL_BACKUP_ROOT")
+    pc.add_argument("--docker-container", help="FRAPPE_DOCKER_CONTAINER (for docker mode)")
+    pc.add_argument("--remote-bench", help="FRAPPE_REMOTE_BENCH (for fm mode)")
+    pc.add_argument("--fm-bin", help="FRAPPE_FM_BIN (for fm mode)")
+    pc.add_argument("--fm-transport", choices=["export", "stream"], help="FRAPPE_FM_TRANSPORT (for fm mode)")
+    pc.add_argument("--fm-export-dir", help="FRAPPE_FM_EXPORT_DIR (for fm export mode)")
+    
+    sub_prof.add_parser("list", help="List all profiles")
+    
+    pd = sub_prof.add_parser("delete", help="Delete a profile")
+    pd.add_argument("name", help="Profile name")
+    
+    ps = sub_prof.add_parser("show", help="Show profile details")
+    ps.add_argument("name", help="Profile name")
+    
+    psd = sub_prof.add_parser("set-default", help="Set default profile")
+    psd.add_argument("name", help="Profile name")
+
     b = sub.add_parser("backup", help="Run remote bench backup and pull artifacts")
     b.add_argument("--site", dest="site", default=None)
 
@@ -382,7 +531,13 @@ def build_parser() -> argparse.ArgumentParser:
 def run(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    ctx = Ctx(dry_run=bool(args.dry_run), verbose=bool(args.verbose))
+    
+    # Determine profile to use: explicit --profile, or default, or None
+    profile = args.profile
+    if not profile and args.cmd not in ["version", "init", "profile"]:
+        profile = get_default_profile()
+    
+    ctx = Ctx(dry_run=bool(args.dry_run), verbose=bool(args.verbose), profile=profile)
     configure_logging(verbose=ctx.verbose)
 
     try:
@@ -411,6 +566,33 @@ def run(argv: Optional[list[str]] = None) -> int:
                 return _cmd_config_set(ctx, args.key, args.value)
             if args.cfg_cmd == "unset":
                 return _cmd_config_unset(ctx, args.key)
+        if args.cmd == "profile":
+            if args.prof_cmd == "create":
+                kwargs = {
+                    "FRAPPE_REMOTE_USER": args.user,
+                    "FRAPPE_REMOTE_MODE": args.mode,
+                }
+                if args.local_backup_root:
+                    kwargs["FRAPPE_LOCAL_BACKUP_ROOT"] = args.local_backup_root
+                if args.docker_container:
+                    kwargs["FRAPPE_DOCKER_CONTAINER"] = args.docker_container
+                if args.remote_bench:
+                    kwargs["FRAPPE_REMOTE_BENCH"] = args.remote_bench
+                if args.fm_bin:
+                    kwargs["FRAPPE_FM_BIN"] = args.fm_bin
+                if args.fm_transport:
+                    kwargs["FRAPPE_FM_TRANSPORT"] = args.fm_transport
+                if args.fm_export_dir:
+                    kwargs["FRAPPE_FM_EXPORT_DIR"] = args.fm_export_dir
+                return _cmd_profile_create(ctx, args.name, args.host, args.bench_path, **kwargs)
+            if args.prof_cmd == "list":
+                return _cmd_profile_list(ctx)
+            if args.prof_cmd == "delete":
+                return _cmd_profile_delete(ctx, args.name)
+            if args.prof_cmd == "show":
+                return _cmd_profile_show(ctx, args.name)
+            if args.prof_cmd == "set-default":
+                return _cmd_profile_set_default(ctx, args.name)
         if args.cmd == "backup":
             return _cmd_backup(ctx, args.site)
         if args.cmd == "verify":

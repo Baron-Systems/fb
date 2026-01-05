@@ -47,6 +47,95 @@ Install from git (example):
 - `fb restore --site site1.com --date 2026-01-05 --confirm`
 - `fb restore --site site1.com --date 2026-01-05 --dry-run`
 
+### Multi-Profile Support (NEW in 0.6.0)
+
+**Manage multiple Frappe benches/servers from a single backup server.**
+
+Each profile has its own:
+- Configuration (`config.toml`)
+- Sites registry (`sites.conf`)
+- Isolated backup directory structure
+
+#### Create a profile
+
+```bash
+fb profile create prod-bench1 \
+  --host frappe-prod-01.example.com \
+  --bench-path /home/frappe/frappe-bench \
+  --user frappe \
+  --mode bench \
+  --local-backup-root /data/backups/prod-bench1
+```
+
+For Frappe Manager (fm):
+
+```bash
+fb profile create fm-dev \
+  --host 192.168.1.205 \
+  --bench-path /home/baron/frappe/sites/dev.mby-solution.vip/workspace/frappe-bench \
+  --user baron \
+  --mode fm \
+  --remote-bench dev.mby-solution.vip \
+  --fm-bin /home/baron/.local/bin/fm \
+  --fm-transport export \
+  --fm-export-dir /home/baron/frappe-exports \
+  --local-backup-root /data/backups/fm-dev
+```
+
+#### Manage profiles
+
+```bash
+# List profiles
+fb profile list
+
+# Show profile details
+fb profile show prod-bench1
+
+# Set default profile (used when --profile is not specified)
+fb profile set-default prod-bench1
+
+# Delete a profile
+fb profile delete old-bench
+```
+
+#### Use profiles
+
+```bash
+# Add sites to a profile
+fb --profile prod-bench1 site add site1.com 30
+fb --profile prod-bench1 site add site2.com 7
+
+# Backup using specific profile
+fb --profile prod-bench1 backup
+
+# Backup using default profile (if set)
+fb backup
+
+# Other commands work the same way
+fb --profile prod-bench1 verify
+fb --profile prod-bench1 status
+fb --profile prod-bench1 restore --site site1.com --date 2026-01-05 --confirm
+```
+
+#### Profile storage
+
+Profiles are stored in:
+
+```
+~/.config/fb/
+├── profiles/
+│   ├── prod-bench1/
+│   │   ├── config.toml
+│   │   └── sites.conf
+│   ├── prod-bench2/
+│   │   ├── config.toml
+│   │   └── sites.conf
+│   └── fm-dev/
+│       ├── config.toml
+│       └── sites.conf
+└── default_profile (contains name of default profile)
+```
+
 ### Backup layout (local)
 
 For each site, backups are stored as:
