@@ -118,16 +118,25 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
     dest_dir = dest_dir.resolve()
     ensure_dir(dest_dir, dry_run=dry_run)
 
-    # remote command exactly as requested (SITE substituted safely).
-    inner = (
-        "set -euo pipefail; "
-        f"bench --site {site} backup --with-files; "
-        f"cd sites/{site}/private/backups; "
-        "tar -czf - ."
+    # remote command: use heredoc stdin execution (fm doesn't accept extra args in many builds).
+    inner_lines = "\n".join(
+        [
+            "set -euo pipefail",
+            f"bench --site {site} backup --with-files",
+            f"cd sites/{site}/private/backups",
+            "tar -czf - .",
+        ]
     )
     fm_bin = getattr(cfg, "fm_bin", "/home/baron/.local/bin/fm")
-    # cfg.fm_bin is an absolute path on the remote host; quote it into the ssh remote script.
-    remote_script = "set -euo pipefail; " + f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -- bash -lc {shlex.quote(inner)}"
+    fm_target = getattr(cfg, "remote_bench", None) or site
+    remote_script = "\n".join(
+        [
+            "set -euo pipefail",
+            f"{shlex.quote(fm_bin)} shell {shlex.quote(fm_target)} <<'EOF'",
+            inner_lines,
+            "EOF",
+        ]
+    )
 
     ssh_argv = [
         "ssh",

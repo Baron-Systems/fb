@@ -111,13 +111,14 @@ If you manage benches via **Frappe Manager (fm)**, set:
 
 In this mode `fb` will run bench commands via:
 
-- `fm shell <SITE> -- bash -lc 'bench --site <SITE> ...'`
+- `fm shell <BENCHNAME> <<'EOF' ... EOF` (stdin script; compatible with fm builds that don't accept extra args)
 
 Notes:
 
 - In fm mode (transport=export), `fb` exports the newest backup artifacts to `FRAPPE_FM_EXPORT_DIR/<SITE>/` on the remote host, then pulls from there via `rsync`.
 - In fm mode (transport=stream), `fb` streams a tarball over SSH directly into `<LOCAL_ROOT>/<SITE>/<DATE>/` (no rsync for artifacts).
 - `FRAPPE_BENCH_PATH` must still be correct *inside* the `fm shell` environment so it can `cd` and locate `sites/<SITE>/private/backups/`.
+- If you see `fm shell ... Got unexpected extra arguments`, set `FRAPPE_REMOTE_BENCH=<benchname>` and ensure fb is using heredoc-based execution (current versions do).
 
 Sites registry:
 

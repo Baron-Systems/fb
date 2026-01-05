@@ -63,7 +63,7 @@ def _cmd_init(ctx: Ctx) -> int:
             "# FRAPPE_BENCH_PATH = \"/home/frappe/frappe-bench\"\n"
             "# FRAPPE_LOCAL_BACKUP_ROOT = \"/data/frappe-backups\"\n"
             "# FRAPPE_DOCKER_CONTAINER = \"\"  # required if FRAPPE_REMOTE_MODE=docker\n"
-            "# FRAPPE_REMOTE_BENCH = \"\"  # required if FRAPPE_REMOTE_MODE=fm\n"
+            "# FRAPPE_REMOTE_BENCH = \"\"  # fm shell target (often BENCHNAME); if empty, fb will try using SITE\n"
             "# FRAPPE_FM_EXPORT_DIR = \"/workspace/exports\"  # required if FRAPPE_REMOTE_MODE=fm\n"
             "# FRAPPE_FM_TRANSPORT = \"export\"  # export|stream (default export)\n"
             "# FRAPPE_FM_BIN = \"/home/baron/.local/bin/fm\"  # fm binary path on remote host\n"

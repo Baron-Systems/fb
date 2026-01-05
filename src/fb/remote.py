@@ -76,9 +76,9 @@ class Remote:
             self._run(script, dry_run=dry_run, check=True)
             return
 
-        # Frappe Manager mode: run bench inside fm-managed environment
-        # In fm mode, we don't run backup here to avoid double-running; see latest_backup_paths()
-        # which performs backup+export staging in one fm shell command.
+        # Frappe Manager mode:
+        # In fm mode, backup is executed as part of latest_backup_paths() (export transport),
+        # or as part of the streaming transport in backup_engine.
         return
 
     def latest_backup_paths(self, site: str, *, dry_run: bool) -> dict[str, Optional[str]]:
@@ -108,29 +108,42 @@ class Remote:
             export_root = _validate_abs_dir(self.cfg.fm_export_dir, "FRAPPE_FM_EXPORT_DIR")
             export_site = f"{export_root.rstrip('/')}/{site}"
             fm_bin = _validate_abs_dir(self.cfg.fm_bin, "FRAPPE_FM_BIN")
+            fm_target = _validate_fm_target(self.cfg.remote_bench or site)
 
-            # Single fm shell command: run backup, find newest artifacts, copy them to export dir.
-            inner = (
-                f"set -euo pipefail; "
-                f"bench --site {shlex.quote(site)} backup --with-files; "
-                f"cd {bench}; "
-                f"bdir={shlex.quote(base)}; "
-                "db=$(ls -1t \"$bdir\"/*_database.sql.gz 2>/dev/null | head -n1 || true); "
-                "pub=$(ls -1t \"$bdir\"/*_files.tar 2>/dev/null | head -n1 || true); "
-                "priv=$(ls -1t \"$bdir\"/*_private-files.tar 2>/dev/null | head -n1 || true); "
-                "[ -n \"$db\" ] || { echo 'ERR=Missing DB artifact'; exit 1; }; "
-                "[ -n \"$pub\" ] || { echo 'ERR=Missing public files artifact'; exit 1; }; "
-                f"mkdir -p {shlex.quote(export_site)}; "
-                f"cp -f -- \"$db\" {shlex.quote(export_site)}/; "
-                f"cp -f -- \"$pub\" {shlex.quote(export_site)}/; "
-                "if [ -n \"$priv\" ]; then "
-                f"cp -f -- \"$priv\" {shlex.quote(export_site)}/; "
-                "fi; "
-                "dbb=${db##*/}; pubb=${pub##*/}; privb=${priv##*/}; "
-                f"printf 'DB={shlex.quote(export_site)}/%s\\nPUB={shlex.quote(export_site)}/%s\\nPRIV={shlex.quote(export_site)}/%s\\n' "
-                "\"$dbb\" \"$pubb\" \"$privb\""
+            # Use heredoc stdin execution because many fm builds do NOT accept extra args.
+            # Also allows a reliable multiline script.
+            inner_lines = "\n".join(
+                [
+                    "set -euo pipefail",
+                    f"bench --site {site} backup --with-files",
+                    f"cd {bench}",
+                    f"bdir={shlex.quote(base)}",
+                    'db=$(ls -1t "$bdir"/*_database.sql.gz 2>/dev/null | head -n1 || true)',
+                    'pub=$(ls -1t "$bdir"/*_files.tar 2>/dev/null | head -n1 || true)',
+                    'priv=$(ls -1t "$bdir"/*_private-files.tar 2>/dev/null | head -n1 || true)',
+                    '[ -n "$db" ] || { echo "ERR=Missing DB artifact"; exit 1; }',
+                    '[ -n "$pub" ] || { echo "ERR=Missing public files artifact"; exit 1; }',
+                    f"mkdir -p {shlex.quote(export_site)}",
+                    f'cp -f -- "$db" {shlex.quote(export_site)}/',
+                    f'cp -f -- "$pub" {shlex.quote(export_site)}/',
+                    'if [ -n "$priv" ]; then',
+                    f'  cp -f -- "$priv" {shlex.quote(export_site)}/',
+                    "fi",
+                    'dbb=${db##*/}; pubb=${pub##*/}; privb=${priv##*/}',
+                    (
+                        f"printf 'DB={shlex.quote(export_site)}/%s\\nPUB={shlex.quote(export_site)}/%s\\nPRIV={shlex.quote(export_site)}/%s\\n' "
+                        '"$dbb" "$pubb" "$privb"'
+                    ),
+                ]
             )
-            script = f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -- bash -lc {shlex.quote(inner)}"
+            script = "\n".join(
+                [
+                    "set -euo pipefail",
+                    f"{shlex.quote(fm_bin)} shell {shlex.quote(fm_target)} <<'EOF'",
+                    inner_lines,
+                    "EOF",
+                ]
+            )
         else:
             container = _validate_container(self.cfg.docker_container)
             # Discover newest artifacts inside container, then stage them onto the host /tmp
@@ -217,8 +230,21 @@ class Remote:
             return
 
         fm_bin = _validate_abs_dir(self.cfg.fm_bin, "FRAPPE_FM_BIN")
-        inner = f"bench --site {shlex.quote(site)} set-maintenance-mode {mode}"
-        script = f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -- bash -lc {shlex.quote(inner)}"
+        fm_target = _validate_fm_target(self.cfg.remote_bench or site)
+        inner_lines = "\n".join(
+            [
+                "set -euo pipefail",
+                f"bench --site {site} set-maintenance-mode {mode}",
+            ]
+        )
+        script = "\n".join(
+            [
+                "set -euo pipefail",
+                f"{shlex.quote(fm_bin)} shell {shlex.quote(fm_target)} <<'EOF'",
+                inner_lines,
+                "EOF",
+            ]
+        )
         self._run(script, dry_run=dry_run, check=True)
 
     def bench_restore(
@@ -274,6 +300,7 @@ class Remote:
 
         # fm mode: delegate restore to fm shell (fm is expected to provide bench environment)
         fm_bin = _validate_abs_dir(self.cfg.fm_bin, "FRAPPE_FM_BIN")
+        fm_target = _validate_fm_target(self.cfg.remote_bench or site)
         cmd = [
             "bench",
             "--site",
@@ -286,8 +313,20 @@ class Remote:
         ]
         if private_files_tar:
             cmd += ["--with-private-files", private_files_tar]
-        inner = shlex.join(cmd)
-        script = f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -- bash -lc {shlex.quote(inner)}"
+        inner_lines = "\n".join(
+            [
+                "set -euo pipefail",
+                shlex.join(cmd),
+            ]
+        )
+        script = "\n".join(
+            [
+                "set -euo pipefail",
+                f"{shlex.quote(fm_bin)} shell {shlex.quote(fm_target)} <<'EOF'",
+                inner_lines,
+                "EOF",
+            ]
+        )
         self._run(script, dry_run=dry_run, check=True)
 
 
@@ -319,5 +358,18 @@ def _validate_abs_dir(path: Optional[str], key: str) -> str:
     if "//" in path or "/../" in path or path.endswith("/.."):
         raise FBError(f"{key} contains an unsafe path.", exit_code=2)
     return path.rstrip("/") or "/"
+
+
+def _validate_fm_target(value: str) -> str:
+    """
+    fm shell target (often BENCHNAME). Some setups may want to pass SITE; keep validation strict.
+    """
+    value = (value or "").strip()
+    if not value:
+        raise FBError("Invalid fm shell target.", exit_code=2)
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
+    if any(c not in allowed for c in value) or value[0] == "-":
+        raise FBError("Invalid fm shell target.", exit_code=2)
+    return value
 
 
