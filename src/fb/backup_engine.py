@@ -124,8 +124,6 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
             "set -euo pipefail",
             f"cd {shlex.quote(cfg.bench_path)}",
             f"bench --site {site} backup --with-files",
-            f"cd sites/{site}/private/backups",
-            "tar -czf - .",
         ]
     )
     fm_bin = getattr(cfg, "fm_bin", "/home/baron/.local/bin/fm")
@@ -133,9 +131,14 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
     remote_script = "\n".join(
         [
             "set -euo pipefail",
-            f"{shlex.quote(fm_bin)} shell {shlex.quote(fm_target)} <<'EOF'",
+            # Ensure any fm/bench output does NOT contaminate the tar.gz stream.
+            # Many fm builds print banners/prompts to stdout; redirect fm stdout to stderr.
+            f"cd {shlex.quote(cfg.bench_path)}",
+            f"{shlex.quote(fm_bin)} shell {shlex.quote(fm_target)} 1>&2 <<'EOF'",
             inner_lines,
             "EOF",
+            f"cd sites/{site}/private/backups",
+            "tar -czf - .",
         ]
     )
 
