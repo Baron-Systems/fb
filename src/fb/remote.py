@@ -73,9 +73,9 @@ class Remote:
             return
 
         # Frappe Manager mode: run bench inside fm-managed environment
-        inner = f"bench --site {shlex.quote(site)} backup --with-files"
-        script = f"fm shell {shlex.quote(site)} -c {shlex.quote(inner)}"
-        self._run(script, dry_run=dry_run, check=True)
+        # In fm mode, we don't run backup here to avoid double-running; see latest_backup_paths()
+        # which performs backup+export staging in one fm shell command.
+        return
 
     def latest_backup_paths(self, site: str, *, dry_run: bool) -> dict[str, Optional[str]]:
         """
@@ -87,7 +87,7 @@ class Remote:
         site = validate_site_name(site)
         bench = shlex.quote(self.cfg.bench_path)
         base = f"sites/{site}/private/backups"
-        if self.cfg.remote_mode in ("bench", "fm"):
+        if self.cfg.remote_mode == "bench":
             # We use ls -1t to find newest matching file for each glob, and prefix with $PWD
             # (since we cd into bench path).
             script = (
@@ -100,6 +100,32 @@ class Remote:
                 f"[ -n \"$priv\" ] && priv=\"$PWD/$priv\" || true; "
                 f"printf 'DB=%s\\nPUB=%s\\nPRIV=%s\\n' \"$db\" \"$pub\" \"$priv\""
             )
+        elif self.cfg.remote_mode == "fm":
+            export_root = _validate_abs_dir(self.cfg.fm_export_dir, "FRAPPE_FM_EXPORT_DIR")
+            export_site = f"{export_root.rstrip('/')}/{site}"
+
+            # Single fm shell command: run backup, find newest artifacts, copy them to export dir.
+            inner = (
+                f"set -euo pipefail; "
+                f"bench --site {shlex.quote(site)} backup --with-files; "
+                f"cd {bench}; "
+                f"bdir={shlex.quote(base)}; "
+                "db=$(ls -1t \"$bdir\"/*_database.sql.gz 2>/dev/null | head -n1 || true); "
+                "pub=$(ls -1t \"$bdir\"/*_files.tar 2>/dev/null | head -n1 || true); "
+                "priv=$(ls -1t \"$bdir\"/*_private-files.tar 2>/dev/null | head -n1 || true); "
+                "[ -n \"$db\" ] || { echo 'ERR=Missing DB artifact'; exit 1; }; "
+                "[ -n \"$pub\" ] || { echo 'ERR=Missing public files artifact'; exit 1; }; "
+                f"mkdir -p {shlex.quote(export_site)}; "
+                f"cp -f -- \"$db\" {shlex.quote(export_site)}/; "
+                f"cp -f -- \"$pub\" {shlex.quote(export_site)}/; "
+                "if [ -n \"$priv\" ]; then "
+                f"cp -f -- \"$priv\" {shlex.quote(export_site)}/; "
+                "fi; "
+                "dbb=${db##*/}; pubb=${pub##*/}; privb=${priv##*/}; "
+                f"printf 'DB={shlex.quote(export_site)}/%s\\nPUB={shlex.quote(export_site)}/%s\\nPRIV={shlex.quote(export_site)}/%s\\n' "
+                "\"$dbb\" \"$pubb\" \"$privb\""
+            )
+            script = f"fm shell {shlex.quote(site)} -c {shlex.quote(inner)}"
         else:
             container = _validate_container(self.cfg.docker_container)
             # Discover newest artifacts inside container, then stage them onto the host /tmp
@@ -276,5 +302,15 @@ def _validate_fm_bench(bench: Optional[str]) -> str:
     if any(c not in allowed for c in bench) or bench[0] == "-":
         raise FBError("Invalid FRAPPE_REMOTE_BENCH.", exit_code=2)
     return bench
+
+
+def _validate_abs_dir(path: Optional[str], key: str) -> str:
+    if not path:
+        raise FBError(f"{key} is required.", exit_code=2)
+    if not path.startswith("/") or any(c.isspace() for c in path) or "\x00" in path:
+        raise FBError(f"{key} must be an absolute path without whitespace.", exit_code=2)
+    if "//" in path or "/../" in path or path.endswith("/.."):
+        raise FBError(f"{key} contains an unsafe path.", exit_code=2)
+    return path.rstrip("/") or "/"
 
 

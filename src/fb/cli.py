@@ -64,6 +64,7 @@ def _cmd_init(ctx: Ctx) -> int:
             "# FRAPPE_LOCAL_BACKUP_ROOT = \"/data/frappe-backups\"\n"
             "# FRAPPE_DOCKER_CONTAINER = \"\"  # required if FRAPPE_REMOTE_MODE=docker\n"
             "# FRAPPE_REMOTE_BENCH = \"\"  # required if FRAPPE_REMOTE_MODE=fm\n"
+            "# FRAPPE_FM_EXPORT_DIR = \"/workspace/exports\"  # required if FRAPPE_REMOTE_MODE=fm\n"
             "# TELEGRAM_TOKEN = \"\"\n"
             "# TELEGRAM_CHAT_ID = \"\"\n"
         )

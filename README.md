@@ -105,7 +105,7 @@ Tip: to find your container name on the remote host, run `docker ps` and pick th
 If you manage benches via **Frappe Manager (fm)**, set:
 
 - `FRAPPE_REMOTE_MODE=fm`
-- `FRAPPE_REMOTE_BENCH=<bench_name_in_fm>` (optional; depends on your fm setup)
+- `FRAPPE_FM_EXPORT_DIR=/workspace/exports`
 
 In this mode `fb` will run bench commands via:
 
@@ -113,7 +113,8 @@ In this mode `fb` will run bench commands via:
 
 Notes:
 
-- `FRAPPE_BENCH_PATH` must still point to the bench path used on the remote host (commonly the mounted bench directory) so `fb` can locate artifacts for rsync pull.
+- In fm mode, `fb` exports the newest backup artifacts to `FRAPPE_FM_EXPORT_DIR/<SITE>/` on the remote host, then pulls from there via `rsync`.
+- `FRAPPE_BENCH_PATH` must still be correct *inside* the `fm shell` environment so it can `cd` and locate `sites/<SITE>/private/backups/`.
 
 Sites registry:
 

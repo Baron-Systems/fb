@@ -21,6 +21,7 @@ CONFIG_ENV_KEYS = [
     "FRAPPE_LOCAL_BACKUP_ROOT",
     "FRAPPE_DOCKER_CONTAINER",
     "FRAPPE_REMOTE_BENCH",
+    "FRAPPE_FM_EXPORT_DIR",
     "TELEGRAM_TOKEN",
     "TELEGRAM_CHAT_ID",
 ]
@@ -67,6 +68,7 @@ class Config:
     local_backup_root: str
     docker_container: Optional[str] = None
     remote_bench: Optional[str] = None
+    fm_export_dir: Optional[str] = None
     telegram_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
 
@@ -97,6 +99,12 @@ class Config:
         # In this repo, fm mode defaults to using the SITE as the fm shell target.
         remote_bench = str(m.get("FRAPPE_REMOTE_BENCH", "")).strip() or None
 
+        fm_export_dir = str(m.get("FRAPPE_FM_EXPORT_DIR", "")).strip() or None
+        if mode == "fm":
+            if not fm_export_dir:
+                raise FBError("FRAPPE_FM_EXPORT_DIR is required when FRAPPE_REMOTE_MODE=fm.", exit_code=2)
+            fm_export_dir = _safe_abs_path(fm_export_dir, "FRAPPE_FM_EXPORT_DIR")
+
         token = str(m.get("TELEGRAM_TOKEN", "")).strip() or None
         chat = str(m.get("TELEGRAM_CHAT_ID", "")).strip() or None
 
@@ -108,6 +116,7 @@ class Config:
             local_backup_root=local_root,
             docker_container=docker_container,
             remote_bench=remote_bench,
+            fm_export_dir=fm_export_dir,
             telegram_token=token,
             telegram_chat_id=chat,
         )
@@ -124,6 +133,8 @@ class Config:
             out["FRAPPE_DOCKER_CONTAINER"] = self.docker_container
         if self.remote_bench:
             out["FRAPPE_REMOTE_BENCH"] = self.remote_bench
+        if self.fm_export_dir:
+            out["FRAPPE_FM_EXPORT_DIR"] = self.fm_export_dir
         if self.telegram_token:
             out["TELEGRAM_TOKEN"] = redact_secret(self.telegram_token) if redact else self.telegram_token
         if self.telegram_chat_id:
