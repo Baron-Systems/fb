@@ -120,10 +120,10 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
 
     # remote command: use heredoc stdin execution (fm doesn't accept extra args in many builds).
     # Hard requirement: keep the pipe's stdout clean and send ONLY the tar.gz bytes to it.
-    # We do that by:
-    # - keeping stdout redirected to stderr for the whole remote script
-    # - opening FD 3 as the original stdout
-    # - writing tar output to /proc/self/fd/3 from inside the fm shell
+    #
+    # IMPORTANT:
+    # Some fm environments do NOT have /proc/self/fd/3 inside the fm shell context.
+    # So we run bench backup inside fm shell (stdout->stderr), then run host-side tar and stream to FD 3.
     bench_candidates = [
         cfg.bench_path,
         "/workspace/frappe-bench",
@@ -140,9 +140,6 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
             'if [ -z "$bench_root" ]; then echo "ERR=Cannot find bench root inside fm shell. Set FRAPPE_BENCH_PATH to the bench root visible inside fm." 1>&2; exit 2; fi',
             'cd "$bench_root"',
             f"bench --site {site} backup --with-files",
-            f"cd sites/{site}/private/backups",
-            # Write the stream to FD 3 explicitly to avoid any stdout contamination.
-            "tar -czf /proc/self/fd/3 .",
         ]
     )
     fm_bin = getattr(cfg, "fm_bin", "/home/baron/.local/bin/fm")
@@ -156,6 +153,11 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
             f"{shlex.quote(fm_bin)} shell {shlex.quote(fm_target)} <<'FMEOF' 1>&2",
             inner_lines,
             "FMEOF",
+            # Host bench path must exist here (remote host filesystem).
+            f"host_backup_dir={shlex.quote(cfg.bench_path.rstrip('/') + '/sites/' + site + '/private/backups')}",
+            'test -d "$host_backup_dir" || { echo "ERR=Backup dir not found on host: $host_backup_dir"; exit 2; }',
+            # Stream tar.gz bytes ONLY to FD 3 (original stdout).
+            'tar -C "$host_backup_dir" -czf - . >&3',
             "exec 3>&-",
         ]
     )
