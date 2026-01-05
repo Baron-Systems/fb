@@ -65,9 +65,17 @@ class Remote:
             return
 
         # Docker mode: run inside container
-        container = _validate_container(self.cfg.docker_container)
+        if self.cfg.remote_mode == "docker":
+            container = _validate_container(self.cfg.docker_container)
+            inner = f"cd {bench} && bench --site {shlex.quote(site)} backup --with-files"
+            script = f"docker exec {shlex.quote(container)} bash -lc {shlex.quote(inner)}"
+            self._run(script, dry_run=dry_run, check=True)
+            return
+
+        # Frappe Manager mode: run bench inside fm-managed environment
+        remote_bench = _validate_fm_bench(self.cfg.remote_bench)
         inner = f"cd {bench} && bench --site {shlex.quote(site)} backup --with-files"
-        script = f"docker exec {shlex.quote(container)} bash -lc {shlex.quote(inner)}"
+        script = f"fm shell {shlex.quote(remote_bench)} -c {shlex.quote(inner)}"
         self._run(script, dry_run=dry_run, check=True)
 
     def latest_backup_paths(self, site: str, *, dry_run: bool) -> dict[str, Optional[str]]:
@@ -171,9 +179,16 @@ class Remote:
             script = f"cd {bench} && bench --site {shlex.quote(site)} set-maintenance-mode {mode}"
             self._run(script, dry_run=dry_run, check=True)
             return
-        container = _validate_container(self.cfg.docker_container)
+        if self.cfg.remote_mode == "docker":
+            container = _validate_container(self.cfg.docker_container)
+            inner = f"cd {bench} && bench --site {shlex.quote(site)} set-maintenance-mode {mode}"
+            script = f"docker exec {shlex.quote(container)} bash -lc {shlex.quote(inner)}"
+            self._run(script, dry_run=dry_run, check=True)
+            return
+
+        remote_bench = _validate_fm_bench(self.cfg.remote_bench)
         inner = f"cd {bench} && bench --site {shlex.quote(site)} set-maintenance-mode {mode}"
-        script = f"docker exec {shlex.quote(container)} bash -lc {shlex.quote(inner)}"
+        script = f"fm shell {shlex.quote(remote_bench)} -c {shlex.quote(inner)}"
         self._run(script, dry_run=dry_run, check=True)
 
     def bench_restore(
@@ -208,21 +223,41 @@ class Remote:
         # - db_path/public_files_tar/private_files_tar are HOST paths (uploaded via rsync to /tmp)
         # - copy them into container temp dir via docker cp
         # - run bench restore inside container using container paths
-        container = _validate_container(self.cfg.docker_container)
-        priv = private_files_tar or ""
-        script = (
-            "set -euo pipefail; "
-            f"ctmp=$(docker exec {shlex.quote(container)} bash -lc 'mktemp -d -p /tmp fb-restore.XXXXXX'); "
-            f"docker cp {shlex.quote(db_path)} {shlex.quote(container)}:\"$ctmp/\"; "
-            f"docker cp {shlex.quote(public_files_tar)} {shlex.quote(container)}:\"$ctmp/\"; "
-            "privname=''; "
-            f"if [ -n {shlex.quote(priv)} ]; then docker cp {shlex.quote(priv)} {shlex.quote(container)}:\"$ctmp/\"; privname=$(basename {shlex.quote(priv)}); fi; "
-            f"dbname=$(basename {shlex.quote(db_path)}); pubname=$(basename {shlex.quote(public_files_tar)}); "
-            f"inner_cmd='cd {bench} && bench --site {shlex.quote(site)} restore \"$ctmp/$dbname\" --with-public-files \"$ctmp/$pubname\" "
-            + ("--with-private-files \"$ctmp/$privname\" " if private_files_tar else "")
-            + "--force'; "
-            f"docker exec {shlex.quote(container)} bash -lc \"$inner_cmd\""
-        )
+        if self.cfg.remote_mode == "docker":
+            container = _validate_container(self.cfg.docker_container)
+            priv = private_files_tar or ""
+            script = (
+                "set -euo pipefail; "
+                f"ctmp=$(docker exec {shlex.quote(container)} bash -lc 'mktemp -d -p /tmp fb-restore.XXXXXX'); "
+                f"docker cp {shlex.quote(db_path)} {shlex.quote(container)}:\"$ctmp/\"; "
+                f"docker cp {shlex.quote(public_files_tar)} {shlex.quote(container)}:\"$ctmp/\"; "
+                "privname=''; "
+                f"if [ -n {shlex.quote(priv)} ]; then docker cp {shlex.quote(priv)} {shlex.quote(container)}:\"$ctmp/\"; privname=$(basename {shlex.quote(priv)}); fi; "
+                f"dbname=$(basename {shlex.quote(db_path)}); pubname=$(basename {shlex.quote(public_files_tar)}); "
+                f"inner_cmd='cd {bench} && bench --site {shlex.quote(site)} restore \"$ctmp/$dbname\" --with-public-files \"$ctmp/$pubname\" "
+                + ("--with-private-files \"$ctmp/$privname\" " if private_files_tar else "")
+                + "--force'; "
+                f"docker exec {shlex.quote(container)} bash -lc \"$inner_cmd\""
+            )
+            self._run(script, dry_run=dry_run, check=True)
+            return
+
+        # fm mode: delegate restore to fm shell (fm is expected to provide bench environment)
+        remote_bench = _validate_fm_bench(self.cfg.remote_bench)
+        cmd = [
+            "bench",
+            "--site",
+            site,
+            "restore",
+            db_path,
+            "--with-public-files",
+            public_files_tar,
+            "--force",
+        ]
+        if private_files_tar:
+            cmd += ["--with-private-files", private_files_tar]
+        inner = f"cd {bench} && {shlex.join(cmd)}"
+        script = f"fm shell {shlex.quote(remote_bench)} -c {shlex.quote(inner)}"
         self._run(script, dry_run=dry_run, check=True)
 
 
@@ -234,5 +269,14 @@ def _validate_container(container: Optional[str]) -> str:
     if any(c not in allowed for c in container) or container[0] == "-":
         raise FBError("Invalid FRAPPE_DOCKER_CONTAINER.", exit_code=2)
     return container
+
+
+def _validate_fm_bench(bench: Optional[str]) -> str:
+    if not bench:
+        raise FBError("FRAPPE_REMOTE_BENCH is required for fm mode.", exit_code=2)
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
+    if any(c not in allowed for c in bench) or bench[0] == "-":
+        raise FBError("Invalid FRAPPE_REMOTE_BENCH.", exit_code=2)
+    return bench
 
 

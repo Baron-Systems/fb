@@ -57,12 +57,13 @@ def _cmd_init(ctx: Ctx) -> int:
             "# fb config\n"
             "# You can also set these via environment variables.\n"
             "#\n"
-            "# FRAPPE_REMOTE_MODE = \"bench\"  # bench|docker\n"
+            "# FRAPPE_REMOTE_MODE = \"bench\"  # bench|docker|fm\n"
             "# FRAPPE_REMOTE_HOST = \"\"\n"
             "# FRAPPE_REMOTE_USER = \"frappe\"\n"
             "# FRAPPE_BENCH_PATH = \"/home/frappe/frappe-bench\"\n"
             "# FRAPPE_LOCAL_BACKUP_ROOT = \"/data/frappe-backups\"\n"
             "# FRAPPE_DOCKER_CONTAINER = \"\"  # required if FRAPPE_REMOTE_MODE=docker\n"
+            "# FRAPPE_REMOTE_BENCH = \"\"  # required if FRAPPE_REMOTE_MODE=fm\n"
             "# TELEGRAM_TOKEN = \"\"\n"
             "# TELEGRAM_CHAT_ID = \"\"\n"
         )
@@ -284,6 +285,9 @@ def _cmd_test(ctx: Ctx) -> int:
     if cfg.remote_mode == "docker" and not ctx.dry_run:
         # Best-effort remote check that docker is available.
         r.require_remote_bin("docker", dry_run=False)
+    if cfg.remote_mode == "fm" and not ctx.dry_run:
+        # Best-effort remote check that fm is available.
+        r.require_remote_bin("fm", dry_run=False)
     print("OK")
     return 0
 

@@ -20,9 +20,12 @@ CONFIG_ENV_KEYS = [
     "FRAPPE_BENCH_PATH",
     "FRAPPE_LOCAL_BACKUP_ROOT",
     "FRAPPE_DOCKER_CONTAINER",
+    "FRAPPE_REMOTE_BENCH",
     "TELEGRAM_TOKEN",
     "TELEGRAM_CHAT_ID",
 ]
+
+ALLOWED_MODES = ["bench", "docker", "fm"]
 
 
 def default_config_dir() -> Path:
@@ -63,14 +66,15 @@ class Config:
     bench_path: str
     local_backup_root: str
     docker_container: Optional[str] = None
+    remote_bench: Optional[str] = None
     telegram_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
 
     @staticmethod
     def from_mapping(m: dict[str, Any]) -> "Config":
         mode = str(m.get("FRAPPE_REMOTE_MODE", "bench")).strip().lower() or "bench"
-        if mode not in ("bench", "docker"):
-            raise FBError("FRAPPE_REMOTE_MODE must be 'bench' or 'docker'.", exit_code=2)
+        if mode not in ALLOWED_MODES:
+            raise FBError("FRAPPE_REMOTE_MODE must be one of: bench, docker, fm.", exit_code=2)
 
         host = str(m.get("FRAPPE_REMOTE_HOST", "")).strip()
         if not host:
@@ -89,6 +93,10 @@ class Config:
         if mode == "docker" and not docker_container:
             raise FBError("FRAPPE_DOCKER_CONTAINER is required when FRAPPE_REMOTE_MODE=docker.", exit_code=2)
 
+        remote_bench = str(m.get("FRAPPE_REMOTE_BENCH", "")).strip() or None
+        if mode == "fm" and not remote_bench:
+            raise FBError("FRAPPE_REMOTE_BENCH is required when FRAPPE_REMOTE_MODE=fm.", exit_code=2)
+
         token = str(m.get("TELEGRAM_TOKEN", "")).strip() or None
         chat = str(m.get("TELEGRAM_CHAT_ID", "")).strip() or None
 
@@ -99,6 +107,7 @@ class Config:
             bench_path=bench,
             local_backup_root=local_root,
             docker_container=docker_container,
+            remote_bench=remote_bench,
             telegram_token=token,
             telegram_chat_id=chat,
         )
@@ -113,6 +122,8 @@ class Config:
         }
         if self.docker_container:
             out["FRAPPE_DOCKER_CONTAINER"] = self.docker_container
+        if self.remote_bench:
+            out["FRAPPE_REMOTE_BENCH"] = self.remote_bench
         if self.telegram_token:
             out["TELEGRAM_TOKEN"] = redact_secret(self.telegram_token) if redact else self.telegram_token
         if self.telegram_chat_id:

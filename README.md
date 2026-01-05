@@ -82,6 +82,7 @@ Optional defaults:
 - `FRAPPE_REMOTE_USER=frappe`
 - `FRAPPE_LOCAL_BACKUP_ROOT=/data/frappe-backups`
 - `FRAPPE_DOCKER_CONTAINER` (required when `FRAPPE_REMOTE_MODE=docker`)
+- `FRAPPE_REMOTE_BENCH` (required when `FRAPPE_REMOTE_MODE=fm`)
 - `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID`
 
 ### Docker / fm mode
@@ -98,6 +99,21 @@ In this mode `fb` will:
 - Pull them to the backup server via `rsync` (still pull-based)
 
 Tip: to find your container name on the remote host, run `docker ps` and pick the Frappe/ERPNext container that has `bench` available.
+
+### fm (Frappe Manager) mode
+
+If you manage benches via **Frappe Manager (fm)**, set:
+
+- `FRAPPE_REMOTE_MODE=fm`
+- `FRAPPE_REMOTE_BENCH=<bench_name_in_fm>`
+
+In this mode `fb` will run bench commands via:
+
+- `fm shell <bench> -c 'bench --site <SITE> ...'`
+
+Notes:
+
+- `FRAPPE_BENCH_PATH` must still point to the bench path used on the remote host (commonly the mounted bench directory) so `fb` can locate artifacts for rsync pull.
 
 Sites registry:
 
