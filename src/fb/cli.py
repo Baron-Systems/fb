@@ -30,6 +30,13 @@ from .metadata import read_last_run
 from .notifications import telegram_send
 from .remote import Remote
 from .restore import restore_site
+from .schedule import (
+    list_all_schedules,
+    remove_cron_job,
+    remove_systemd_timer,
+    setup_cron_job,
+    setup_systemd_timer,
+)
 from .sites import get_site, load_sites, site_add, site_edit, site_remove
 from .utils import FBError, configure_logging, list_date_dirs, parse_date_yyyy_mm_dd, require_bin, validate_site_name
 from .verify import verify_backup_dir
@@ -428,6 +435,97 @@ def _cmd_profile_set_default(ctx: Ctx, name: str) -> int:
     return 0
 
 
+def _cmd_schedule_setup(ctx: Ctx, time: str, method: str) -> int:
+    """Setup scheduled backup."""
+    if method == "cron":
+        if ctx.dry_run:
+            cron_line = setup_cron_job(ctx.profile, time, dry_run=True)
+            print(f"DRY-RUN: would add cron job:")
+            print(f"  {cron_line}")
+            return 0
+        
+        cron_line = setup_cron_job(ctx.profile, time, dry_run=False)
+        profile_label = f"profile '{ctx.profile}'" if ctx.profile else "default"
+        print(f"✓ Cron job added for {profile_label}")
+        print(f"  Schedule: {cron_line}")
+        print(f"  Logs: /var/log/fb-backup{'-' + ctx.profile if ctx.profile else ''}.log")
+        return 0
+    
+    elif method == "systemd":
+        if ctx.dry_run:
+            service, timer = setup_systemd_timer(ctx.profile, time, dry_run=True)
+            print(f"DRY-RUN: would create systemd timer")
+            print(f"\nService:\n{service}")
+            print(f"\nTimer:\n{timer}")
+            return 0
+        
+        setup_systemd_timer(ctx.profile, time, dry_run=False)
+        profile_label = f"profile '{ctx.profile}'" if ctx.profile else "default"
+        print(f"✓ Systemd timer created and started for {profile_label}")
+        print(f"  Check status: systemctl --user status fb-backup{'-' + ctx.profile if ctx.profile else ''}.timer")
+        print(f"  View logs: journalctl --user -u fb-backup{'-' + ctx.profile if ctx.profile else ''}.service")
+        return 0
+    
+    return 2
+
+
+def _cmd_schedule_list(ctx: Ctx) -> int:
+    """List all scheduled backups."""
+    _ = ctx
+    schedules = list_all_schedules()
+    
+    if not schedules:
+        print("No scheduled backups configured.")
+        return 0
+    
+    print("PROFILE\tMETHOD\tSCHEDULE\tSTATUS")
+    for s in schedules:
+        status = s.get("status", "enabled")
+        schedule = s.get("schedule", "unknown")
+        # Simplify cron schedule display
+        if s["method"] == "cron":
+            schedule = schedule.split(" ", 5)[-1] if " " in schedule else schedule
+            schedule = schedule[:60] + "..." if len(schedule) > 60 else schedule
+        print(f"{s['profile']}\t{s['method']}\t{schedule}\t{status}")
+    
+    return 0
+
+
+def _cmd_schedule_remove(ctx: Ctx, method: Optional[str]) -> int:
+    """Remove scheduled backup."""
+    removed_any = False
+    
+    if method is None or method == "cron":
+        if ctx.dry_run:
+            exists = remove_cron_job(ctx.profile, dry_run=True)
+            if exists:
+                print(f"DRY-RUN: would remove cron job for {ctx.profile or 'default'}")
+                removed_any = True
+        else:
+            removed = remove_cron_job(ctx.profile, dry_run=False)
+            if removed:
+                print(f"✓ Removed cron job for {ctx.profile or 'default'}")
+                removed_any = True
+    
+    if method is None or method == "systemd":
+        if ctx.dry_run:
+            exists = remove_systemd_timer(ctx.profile, dry_run=True)
+            if exists:
+                print(f"DRY-RUN: would remove systemd timer for {ctx.profile or 'default'}")
+                removed_any = True
+        else:
+            removed = remove_systemd_timer(ctx.profile, dry_run=False)
+            if removed:
+                print(f"✓ Removed systemd timer for {ctx.profile or 'default'}")
+                removed_any = True
+    
+    if not removed_any:
+        print(f"No scheduled backups found for {ctx.profile or 'default'}")
+        return 1
+    
+    return 0
+
+
 def _cmd_test(ctx: Ctx) -> int:
     cfg = load_config(profile=ctx.profile)
     for b in ["ssh", "rsync", "tar", "gzip"]:
@@ -505,6 +603,18 @@ def build_parser() -> argparse.ArgumentParser:
     
     psd = sub_prof.add_parser("set-default", help="Set default profile")
     psd.add_argument("name", help="Profile name")
+
+    p_sched = sub.add_parser("schedule", help="Manage backup scheduling (cron/systemd)")
+    sub_sched = p_sched.add_subparsers(dest="sched_cmd", required=True)
+    
+    ss = sub_sched.add_parser("setup", help="Setup scheduled backup")
+    ss.add_argument("--time", required=True, help="Time in HH:MM format (e.g., 02:00)")
+    ss.add_argument("--method", choices=["cron", "systemd"], default="cron", help="Scheduling method")
+    
+    sub_sched.add_parser("list", help="List all scheduled backups")
+    
+    sr = sub_sched.add_parser("remove", help="Remove scheduled backup")
+    sr.add_argument("--method", choices=["cron", "systemd"], default=None, help="Remove specific method only")
 
     b = sub.add_parser("backup", help="Run remote bench backup and pull artifacts")
     b.add_argument("--site", dest="site", default=None)
@@ -593,6 +703,13 @@ def run(argv: Optional[list[str]] = None) -> int:
                 return _cmd_profile_show(ctx, args.name)
             if args.prof_cmd == "set-default":
                 return _cmd_profile_set_default(ctx, args.name)
+        if args.cmd == "schedule":
+            if args.sched_cmd == "setup":
+                return _cmd_schedule_setup(ctx, args.time, args.method)
+            if args.sched_cmd == "list":
+                return _cmd_schedule_list(ctx)
+            if args.sched_cmd == "remove":
+                return _cmd_schedule_remove(ctx, args.method)
         if args.cmd == "backup":
             return _cmd_backup(ctx, args.site)
         if args.cmd == "verify":

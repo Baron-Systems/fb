@@ -136,6 +136,83 @@ Profiles are stored in:
 └── default_profile (contains name of default profile)
 ```
 
+### Automated Scheduling (NEW in 0.7.0)
+
+**Built-in commands to schedule automatic backups (no manual cron/systemd editing required).**
+
+#### Setup scheduling
+
+```bash
+# Schedule daily backup at 2:00 AM using cron (default)
+fb schedule setup --time 02:00
+
+# Schedule using systemd timer
+fb schedule setup --time 02:00 --method systemd
+
+# Schedule for specific profile
+fb --profile prod-bench1 schedule setup --time 02:00
+fb --profile prod-bench2 schedule setup --time 03:00
+fb --profile fm-dev schedule setup --time 04:00
+```
+
+#### Manage schedules
+
+```bash
+# List all scheduled backups
+fb schedule list
+
+# Example output:
+# PROFILE        METHOD   SCHEDULE                            STATUS
+# (default)      cron     0 2 * * * fb backup >> /var/log/... enabled
+# prod-bench1    systemd  *-*-* 02:00:00                      active
+
+# Remove scheduled backup
+fb schedule remove
+
+# Remove specific method only
+fb schedule remove --method cron
+fb schedule remove --method systemd
+
+# Remove for specific profile
+fb --profile prod-bench1 schedule remove
+```
+
+#### Scheduling methods
+
+**Cron (default)**:
+- ✅ Simple, widely supported
+- ✅ No sudo required
+- ✅ Logs to `/var/log/fb-backup.log`
+- ✅ Use: `fb schedule setup --time HH:MM --method cron`
+
+**Systemd timer**:
+- ✅ Modern, better logging
+- ✅ Persistent (runs missed schedules on boot)
+- ✅ Use: `fb schedule setup --time HH:MM --method systemd`
+- ✅ Check status: `systemctl --user status fb-backup.timer`
+- ✅ View logs: `journalctl --user -u fb-backup.service`
+
+#### Complete example
+
+```bash
+# Create profiles
+fb profile create prod-bench1 --host prod1.example.com --bench-path /home/frappe/frappe-bench
+fb profile create prod-bench2 --host prod2.example.com --bench-path /home/frappe/frappe-bench
+
+# Add sites to each profile
+fb --profile prod-bench1 site add site1.com 30
+fb --profile prod-bench2 site add site2.com 7
+
+# Schedule backups
+fb --profile prod-bench1 schedule setup --time 02:00 --method systemd
+fb --profile prod-bench2 schedule setup --time 03:00 --method systemd
+
+# Verify schedules
+fb schedule list
+
+# All backups will now run automatically!
+```
+
 ### Backup layout (local)
 
 For each site, backups are stored as:
@@ -213,19 +290,121 @@ Sites registry:
 
 - `~/.config/fb/sites.conf` with lines: `SITE_NAME  RETENTION_DAYS`
 
-### Commands
+### Commands Reference
 
-- `fb init`
-- `fb site add|remove|edit ...`
-- `fb list`
-- `fb backup [--site SITE] [--dry-run]`
-- `fb verify [--site SITE] [--date YYYY-MM-DD] [--dry-run]`
-- `fb restore --site SITE --date YYYY-MM-DD (--confirm | --dry-run)`
-- `fb export --site SITE --date YYYY-MM-DD --to /path/to/dest` (copy local backup to external directory)
-- `fb status`
-- `fb test`
-- `fb version`
-- `fb config show|check|set|get|unset`
+#### Core Commands
+
+```bash
+# Initialize config directory and sites registry
+fb init
+
+# List configured sites
+fb list
+
+# Run backup (all sites or specific site)
+fb backup [--site SITE] [--dry-run]
+
+# Verify backups
+fb verify [--site SITE] [--date YYYY-MM-DD] [--dry-run]
+
+# Restore backup (requires --confirm)
+fb restore --site SITE --date YYYY-MM-DD [--confirm|--dry-run]
+
+# Export backup to external directory or remote host
+fb export --site SITE --date YYYY-MM-DD --to /path/or/user@host:/path
+
+# Show last run status for all sites
+fb status
+
+# Test connection and tools
+fb test
+
+# Show version
+fb version
+```
+
+#### Site Management
+
+```bash
+# Add site with retention days
+fb site add SITE RETENTION_DAYS
+
+# Remove site from registry
+fb site remove SITE
+
+# Edit site retention
+fb site edit SITE RETENTION_DAYS
+```
+
+#### Configuration Management
+
+```bash
+# Show effective configuration (redacted)
+fb config show
+
+# Check configuration and required tools
+fb config check
+
+# Get specific config key
+fb config get KEY
+
+# Set config key in config file
+fb config set KEY VALUE
+
+# Remove config key from config file
+fb config unset KEY
+```
+
+#### Profile Management (Multi-bench/server support)
+
+```bash
+# Create a new profile
+fb profile create NAME --host HOST --bench-path PATH [OPTIONS]
+
+# List all profiles
+fb profile list
+
+# Show profile details
+fb profile show NAME
+
+# Set default profile
+fb profile set-default NAME
+
+# Delete a profile
+fb profile delete NAME
+
+# Use specific profile for any command
+fb --profile NAME <command>
+```
+
+#### Schedule Management (Automated backups)
+
+```bash
+# Setup scheduled backup (cron or systemd)
+fb schedule setup --time HH:MM [--method cron|systemd]
+
+# List all scheduled backups
+fb schedule list
+
+# Remove scheduled backup
+fb schedule remove [--method cron|systemd]
+
+# Schedule for specific profile
+fb --profile NAME schedule setup --time HH:MM
+```
+
+#### Global Options
+
+```bash
+# Dry-run mode (simulate without executing)
+fb --dry-run <command>
+
+# Verbose logging
+fb --verbose <command>
+
+# Use specific profile
+fb --profile NAME <command>
+```
 
 ### Architecture / modules
 
