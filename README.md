@@ -111,7 +111,7 @@ If you manage benches via **Frappe Manager (fm)**, set:
 
 In this mode `fb` will run bench commands via:
 
-- `fm shell <SITE> -c 'bench --site <SITE> ...'`
+- `fm shell <SITE> -- bash -lc 'bench --site <SITE> ...'`
 
 Notes:
 

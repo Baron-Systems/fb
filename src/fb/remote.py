@@ -130,7 +130,7 @@ class Remote:
                 f"printf 'DB={shlex.quote(export_site)}/%s\\nPUB={shlex.quote(export_site)}/%s\\nPRIV={shlex.quote(export_site)}/%s\\n' "
                 "\"$dbb\" \"$pubb\" \"$privb\""
             )
-            script = f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -c {shlex.quote(inner)}"
+            script = f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -- bash -lc {shlex.quote(inner)}"
         else:
             container = _validate_container(self.cfg.docker_container)
             # Discover newest artifacts inside container, then stage them onto the host /tmp
@@ -218,7 +218,7 @@ class Remote:
 
         fm_bin = _validate_abs_dir(self.cfg.fm_bin, "FRAPPE_FM_BIN")
         inner = f"bench --site {shlex.quote(site)} set-maintenance-mode {mode}"
-        script = f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -c {shlex.quote(inner)}"
+        script = f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -- bash -lc {shlex.quote(inner)}"
         self._run(script, dry_run=dry_run, check=True)
 
     def bench_restore(
@@ -287,7 +287,7 @@ class Remote:
         if private_files_tar:
             cmd += ["--with-private-files", private_files_tar]
         inner = shlex.join(cmd)
-        script = f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -c {shlex.quote(inner)}"
+        script = f"{shlex.quote(fm_bin)} shell {shlex.quote(site)} -- bash -lc {shlex.quote(inner)}"
         self._run(script, dry_run=dry_run, check=True)
 
 
