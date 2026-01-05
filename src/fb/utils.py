@@ -130,15 +130,32 @@ def run_pipe(
         text=False,
     )
     try:
-        right = subprocess.Popen(argv_right, stdin=left.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
+        # right stdout is not needed in our usage; keep PIPE for consistent error capture
+        right = subprocess.Popen(
+            argv_right,
+            stdin=left.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=False,
+        )
         assert left.stdout is not None
         left.stdout.close()  # allow left to receive SIGPIPE if right exits
+
         if stdin_left is not None:
             assert left.stdin is not None
             left.stdin.write(stdin_left)
             left.stdin.close()
+
+        # Collect right output first (it may be the root cause).
         out_r, err_r = right.communicate()
-        out_l, err_l = left.communicate()
+
+        # Do NOT call left.communicate() because its stdout is wired into the pipe.
+        # Just wait and read stderr.
+        left.wait()
+        out_l = b""
+        err_l = b""
+        if left.stderr is not None:
+            err_l = left.stderr.read() or b""
     finally:
         try:
             left.kill()
