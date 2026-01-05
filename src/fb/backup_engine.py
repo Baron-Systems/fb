@@ -136,8 +136,8 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
             # Keep stdout *clean* for the tar.gz stream.
             # Some fm/bench setups print banners/prompts to stdout even when running non-interactively.
             # Strategy:
-            # - Redirect stdout -> stderr for all pre-tar steps
-            # - Restore stdout only for the final tar command
+            # - Redirect stdout -> stderr for the entire script
+            # - Send ONLY the tar.gz bytes to the original stdout via FD 3
             "exec 3>&1",
             "exec 1>&2",
             f"test -d {shlex.quote(cfg.bench_path)} || {{ echo 'ERR=FRAPPE_BENCH_PATH not found: {cfg.bench_path}'; exit 2; }}",
@@ -145,10 +145,9 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
             inner_lines,
             "EOF",
             f"test -d {shlex.quote(backup_dir)} || {{ echo 'ERR=Backup dir not found: {backup_dir}'; exit 2; }}",
-            # Restore stdout for the stream.
-            "exec 1>&3",
+            # Stream tar.gz to the original stdout (FD 3) only.
+            f"tar -C {shlex.quote(backup_dir)} -czf - . >&3",
             "exec 3>&-",
-            f"tar -C {shlex.quote(backup_dir)} -czf - .",
         ]
     )
 
