@@ -12,7 +12,7 @@
 
 Install from git (example):
 
-- `pipx install git+https://github.com/<ORG>/<REPO>.git`
+- `pipx install git+https://github.com/Baron-Systems/fb.git`
 
 ### Quick start
 
