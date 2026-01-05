@@ -57,10 +57,12 @@ def _cmd_init(ctx: Ctx) -> int:
             "# fb config\n"
             "# You can also set these via environment variables.\n"
             "#\n"
+            "# FRAPPE_REMOTE_MODE = \"bench\"  # bench|docker\n"
             "# FRAPPE_REMOTE_HOST = \"\"\n"
             "# FRAPPE_REMOTE_USER = \"frappe\"\n"
             "# FRAPPE_BENCH_PATH = \"/home/frappe/frappe-bench\"\n"
             "# FRAPPE_LOCAL_BACKUP_ROOT = \"/data/frappe-backups\"\n"
+            "# FRAPPE_DOCKER_CONTAINER = \"\"  # required if FRAPPE_REMOTE_MODE=docker\n"
             "# TELEGRAM_TOKEN = \"\"\n"
             "# TELEGRAM_CHAT_ID = \"\"\n"
         )
@@ -139,9 +141,13 @@ def _cmd_config_show(ctx: Ctx) -> int:
 
 def _cmd_config_check(ctx: Ctx) -> int:
     _ = ctx
-    _ = load_config()
+    cfg = load_config()
     for b in ["ssh", "rsync", "tar", "gzip"]:
         require_bin(b)
+    if cfg.remote_mode == "docker":
+        # Docker binary required on remote host; we also ensure local ssh client exists (above).
+        # This does not validate remote permissions, but will fail fast in fb test.
+        pass
     print("OK")
     return 0
 
@@ -270,10 +276,14 @@ def _cmd_status(ctx: Ctx) -> int:
 
 
 def _cmd_test(ctx: Ctx) -> int:
-    _ = load_config()
+    cfg = load_config()
     for b in ["ssh", "rsync", "tar", "gzip"]:
         require_bin(b)
-    Remote(load_config()).ping(dry_run=ctx.dry_run)
+    r = Remote(cfg)
+    r.ping(dry_run=ctx.dry_run)
+    if cfg.remote_mode == "docker" and not ctx.dry_run:
+        # Best-effort remote check that docker is available.
+        r.require_remote_bin("docker", dry_run=False)
     print("OK")
     return 0
 

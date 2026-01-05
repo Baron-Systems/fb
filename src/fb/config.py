@@ -14,10 +14,12 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 CONFIG_ENV_KEYS = [
+    "FRAPPE_REMOTE_MODE",
     "FRAPPE_REMOTE_HOST",
     "FRAPPE_REMOTE_USER",
     "FRAPPE_BENCH_PATH",
     "FRAPPE_LOCAL_BACKUP_ROOT",
+    "FRAPPE_DOCKER_CONTAINER",
     "TELEGRAM_TOKEN",
     "TELEGRAM_CHAT_ID",
 ]
@@ -55,15 +57,21 @@ def _safe_abs_path(value: str, key: str) -> str:
 
 @dataclass(frozen=True)
 class Config:
+    remote_mode: str
     remote_host: str
     remote_user: str
     bench_path: str
     local_backup_root: str
+    docker_container: Optional[str] = None
     telegram_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
 
     @staticmethod
     def from_mapping(m: dict[str, Any]) -> "Config":
+        mode = str(m.get("FRAPPE_REMOTE_MODE", "bench")).strip().lower() or "bench"
+        if mode not in ("bench", "docker"):
+            raise FBError("FRAPPE_REMOTE_MODE must be 'bench' or 'docker'.", exit_code=2)
+
         host = str(m.get("FRAPPE_REMOTE_HOST", "")).strip()
         if not host:
             raise FBError("FRAPPE_REMOTE_HOST is required.", exit_code=2)
@@ -77,25 +85,34 @@ class Config:
         local_root = str(m.get("FRAPPE_LOCAL_BACKUP_ROOT", str(default_local_backup_root()))).strip()
         local_root = _safe_abs_path(local_root, "FRAPPE_LOCAL_BACKUP_ROOT")
 
+        docker_container = str(m.get("FRAPPE_DOCKER_CONTAINER", "")).strip() or None
+        if mode == "docker" and not docker_container:
+            raise FBError("FRAPPE_DOCKER_CONTAINER is required when FRAPPE_REMOTE_MODE=docker.", exit_code=2)
+
         token = str(m.get("TELEGRAM_TOKEN", "")).strip() or None
         chat = str(m.get("TELEGRAM_CHAT_ID", "")).strip() or None
 
         return Config(
+            remote_mode=mode,
             remote_host=host,
             remote_user=user,
             bench_path=bench,
             local_backup_root=local_root,
+            docker_container=docker_container,
             telegram_token=token,
             telegram_chat_id=chat,
         )
 
     def as_env_mapping(self, *, redact: bool) -> dict[str, str]:
         out: dict[str, str] = {
+            "FRAPPE_REMOTE_MODE": self.remote_mode,
             "FRAPPE_REMOTE_HOST": self.remote_host,
             "FRAPPE_REMOTE_USER": self.remote_user,
             "FRAPPE_BENCH_PATH": self.bench_path,
             "FRAPPE_LOCAL_BACKUP_ROOT": self.local_backup_root,
         }
+        if self.docker_container:
+            out["FRAPPE_DOCKER_CONTAINER"] = self.docker_container
         if self.telegram_token:
             out["TELEGRAM_TOKEN"] = redact_secret(self.telegram_token) if redact else self.telegram_token
         if self.telegram_chat_id:

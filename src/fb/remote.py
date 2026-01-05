@@ -44,14 +44,30 @@ class Remote:
     def _run(self, script: str, *, dry_run: bool, check: bool = True) -> CmdResult:
         return run_cmd(self._bash_lc(script), dry_run=dry_run, check=check, capture=True)
 
+    def require_remote_bin(self, name: str, *, dry_run: bool) -> None:
+        """
+        Best-effort remote check for a binary.
+        """
+        if not name or any(c.isspace() for c in name):
+            raise FBError("Invalid binary name.", exit_code=2)
+        self._run(f"command -v {shlex.quote(name)} >/dev/null 2>&1", dry_run=dry_run, check=True)
+
     def ping(self, *, dry_run: bool) -> None:
         self._run("true", dry_run=dry_run, check=True)
 
     def bench_backup_with_files(self, site: str, *, dry_run: bool) -> None:
         site = validate_site_name(site)
         bench = shlex.quote(self.cfg.bench_path)
-        # bench itself is on the remote system; fb never needs it locally
-        script = f"cd {bench} && bench --site {shlex.quote(site)} backup --with-files"
+        if self.cfg.remote_mode == "bench":
+            # bench itself is on the remote system; fb never needs it locally
+            script = f"cd {bench} && bench --site {shlex.quote(site)} backup --with-files"
+            self._run(script, dry_run=dry_run, check=True)
+            return
+
+        # Docker mode: run inside container
+        container = _validate_container(self.cfg.docker_container)
+        inner = f"cd {bench} && bench --site {shlex.quote(site)} backup --with-files"
+        script = f"docker exec {shlex.quote(container)} bash -lc {shlex.quote(inner)}"
         self._run(script, dry_run=dry_run, check=True)
 
     def latest_backup_paths(self, site: str, *, dry_run: bool) -> dict[str, Optional[str]]:
@@ -64,27 +80,60 @@ class Remote:
         site = validate_site_name(site)
         bench = shlex.quote(self.cfg.bench_path)
         base = f"sites/{site}/private/backups"
-        # We use ls -1t to find newest matching file for each glob, and prefix with $PWD
-        # (since we cd into bench path).
-        script = (
-            f"cd {bench} && "
-            f"db=$(ls -1t {shlex.quote(base)}/*_database.sql.gz 2>/dev/null | head -n1 || true); "
-            f"pub=$(ls -1t {shlex.quote(base)}/*_files.tar 2>/dev/null | head -n1 || true); "
-            f"priv=$(ls -1t {shlex.quote(base)}/*_private-files.tar 2>/dev/null | head -n1 || true); "
-            f"[ -n \"$db\" ] && db=\"$PWD/$db\" || true; "
-            f"[ -n \"$pub\" ] && pub=\"$PWD/$pub\" || true; "
-            f"[ -n \"$priv\" ] && priv=\"$PWD/$priv\" || true; "
-            f"printf 'DB=%s\\nPUB=%s\\nPRIV=%s\\n' \"$db\" \"$pub\" \"$priv\""
-        )
+        if self.cfg.remote_mode == "bench":
+            # We use ls -1t to find newest matching file for each glob, and prefix with $PWD
+            # (since we cd into bench path).
+            script = (
+                f"cd {bench} && "
+                f"db=$(ls -1t {shlex.quote(base)}/*_database.sql.gz 2>/dev/null | head -n1 || true); "
+                f"pub=$(ls -1t {shlex.quote(base)}/*_files.tar 2>/dev/null | head -n1 || true); "
+                f"priv=$(ls -1t {shlex.quote(base)}/*_private-files.tar 2>/dev/null | head -n1 || true); "
+                f"[ -n \"$db\" ] && db=\"$PWD/$db\" || true; "
+                f"[ -n \"$pub\" ] && pub=\"$PWD/$pub\" || true; "
+                f"[ -n \"$priv\" ] && priv=\"$PWD/$priv\" || true; "
+                f"printf 'DB=%s\\nPUB=%s\\nPRIV=%s\\n' \"$db\" \"$pub\" \"$priv\""
+            )
+        else:
+            container = _validate_container(self.cfg.docker_container)
+            # Discover newest artifacts inside container, then stage them onto the host /tmp
+            # using docker cp, so fb can pull them via rsync.
+            inner = (
+                f"cd {bench} && "
+                f"db=$(ls -1t {shlex.quote(base)}/*_database.sql.gz 2>/dev/null | head -n1 || true); "
+                f"pub=$(ls -1t {shlex.quote(base)}/*_files.tar 2>/dev/null | head -n1 || true); "
+                f"priv=$(ls -1t {shlex.quote(base)}/*_private-files.tar 2>/dev/null | head -n1 || true); "
+                f"printf 'DB=%s\\nPUB=%s\\nPRIV=%s\\n' \"$db\" \"$pub\" \"$priv\""
+            )
+            # We run docker exec to get the paths, then docker cp to stage.
+            script = (
+                "set -euo pipefail; "
+                f"tmp=$(mktemp -d -p /tmp fb-stage.XXXXXX); "
+                f"out=$(docker exec {shlex.quote(container)} bash -lc {shlex.quote(inner)}); "
+                "db=$(printf '%s\n' \"$out\" | sed -n 's/^DB=//p'); "
+                "pub=$(printf '%s\n' \"$out\" | sed -n 's/^PUB=//p'); "
+                "priv=$(printf '%s\n' \"$out\" | sed -n 's/^PRIV=//p'); "
+                "[ -n \"$db\" ] || { echo 'ERR=Missing DB artifact'; exit 1; }; "
+                "[ -n \"$pub\" ] || { echo 'ERR=Missing public files artifact'; exit 1; }; "
+                "dbb=${db##*/}; pubb=${pub##*/}; "
+                f"docker cp {shlex.quote(container)}:\"$db\" \"$tmp/$dbb\"; "
+                f"docker cp {shlex.quote(container)}:\"$pub\" \"$tmp/$pubb\"; "
+                "privb=''; "
+                "if [ -n \"$priv\" ]; then privb=${priv##*/}; "
+                f"docker cp {shlex.quote(container)}:\"$priv\" \"$tmp/$privb\"; "
+                "fi; "
+                "printf 'STAGED=%s\nDB=%s/%s\nPUB=%s/%s\nPRIV=%s/%s\n' "
+                "\"$tmp\" \"$tmp\" \"$dbb\" \"$tmp\" \"$pubb\" \"$tmp\" \"$privb\""
+            )
         res = self._run(script, dry_run=dry_run, check=True)
         if dry_run:
-            return {"db": None, "public": None, "private": None}
+            return {"stage_dir": None, "db": None, "public": None, "private": None}
 
         kv: dict[str, str] = {}
         for line in res.stdout.splitlines():
             if "=" in line:
                 k, v = line.split("=", 1)
                 kv[k.strip()] = v.strip()
+        stage = kv.get("STAGED", "")
         db = kv.get("DB", "")
         pub = kv.get("PUB", "")
         priv = kv.get("PRIV", "")
@@ -94,7 +143,7 @@ class Remote:
                 "Expected *_database.sql.gz and *_files.tar in sites/<SITE>/private/backups/.",
                 exit_code=1,
             )
-        return {"db": db, "public": pub, "private": priv or None}
+        return {"stage_dir": stage or None, "db": db, "public": pub, "private": priv or None}
 
     def mktemp_dir(self, *, prefix: str, dry_run: bool) -> str:
         safe_prefix = "".join([c for c in prefix if c.isalnum() or c in ("-", "_")])[:40] or "fb"
@@ -118,7 +167,13 @@ class Remote:
         site = validate_site_name(site)
         bench = shlex.quote(self.cfg.bench_path)
         mode = "on" if enabled else "off"
-        script = f"cd {bench} && bench --site {shlex.quote(site)} set-maintenance-mode {mode}"
+        if self.cfg.remote_mode == "bench":
+            script = f"cd {bench} && bench --site {shlex.quote(site)} set-maintenance-mode {mode}"
+            self._run(script, dry_run=dry_run, check=True)
+            return
+        container = _validate_container(self.cfg.docker_container)
+        inner = f"cd {bench} && bench --site {shlex.quote(site)} set-maintenance-mode {mode}"
+        script = f"docker exec {shlex.quote(container)} bash -lc {shlex.quote(inner)}"
         self._run(script, dry_run=dry_run, check=True)
 
     def bench_restore(
@@ -132,20 +187,52 @@ class Remote:
     ) -> None:
         site = validate_site_name(site)
         bench = shlex.quote(self.cfg.bench_path)
-        cmd = [
-            "bench",
-            "--site",
-            site,
-            "restore",
-            db_path,
-            "--with-public-files",
-            public_files_tar,
-            "--force",
-        ]
-        if private_files_tar:
-            cmd += ["--with-private-files", private_files_tar]
-        # Use shlex.join for safe quoting in remote bash -lc.
-        script = f"cd {bench} && {shlex.join(cmd)}"
+        if self.cfg.remote_mode == "bench":
+            cmd = [
+                "bench",
+                "--site",
+                site,
+                "restore",
+                db_path,
+                "--with-public-files",
+                public_files_tar,
+                "--force",
+            ]
+            if private_files_tar:
+                cmd += ["--with-private-files", private_files_tar]
+            script = f"cd {bench} && {shlex.join(cmd)}"
+            self._run(script, dry_run=dry_run, check=True)
+            return
+
+        # Docker mode:
+        # - db_path/public_files_tar/private_files_tar are HOST paths (uploaded via rsync to /tmp)
+        # - copy them into container temp dir via docker cp
+        # - run bench restore inside container using container paths
+        container = _validate_container(self.cfg.docker_container)
+        priv = private_files_tar or ""
+        script = (
+            "set -euo pipefail; "
+            f"ctmp=$(docker exec {shlex.quote(container)} bash -lc 'mktemp -d -p /tmp fb-restore.XXXXXX'); "
+            f"docker cp {shlex.quote(db_path)} {shlex.quote(container)}:\"$ctmp/\"; "
+            f"docker cp {shlex.quote(public_files_tar)} {shlex.quote(container)}:\"$ctmp/\"; "
+            "privname=''; "
+            f"if [ -n {shlex.quote(priv)} ]; then docker cp {shlex.quote(priv)} {shlex.quote(container)}:\"$ctmp/\"; privname=$(basename {shlex.quote(priv)}); fi; "
+            f"dbname=$(basename {shlex.quote(db_path)}); pubname=$(basename {shlex.quote(public_files_tar)}); "
+            f"inner_cmd='cd {bench} && bench --site {shlex.quote(site)} restore \"$ctmp/$dbname\" --with-public-files \"$ctmp/$pubname\" "
+            + ("--with-private-files \"$ctmp/$privname\" " if private_files_tar else "")
+            + "--force'; "
+            f"docker exec {shlex.quote(container)} bash -lc \"$inner_cmd\""
+        )
         self._run(script, dry_run=dry_run, check=True)
+
+
+def _validate_container(container: Optional[str]) -> str:
+    if not container:
+        raise FBError("FRAPPE_DOCKER_CONTAINER is required for docker mode.", exit_code=2)
+    # conservative validation
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
+    if any(c not in allowed for c in container) or container[0] == "-":
+        raise FBError("Invalid FRAPPE_DOCKER_CONTAINER.", exit_code=2)
+    return container
 
 

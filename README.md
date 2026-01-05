@@ -73,6 +73,7 @@ Config is loaded from:
 
 Required:
 
+- `FRAPPE_REMOTE_MODE` (default: `bench`, values: `bench` | `docker`)
 - `FRAPPE_REMOTE_HOST`
 - `FRAPPE_BENCH_PATH`
 
@@ -80,7 +81,23 @@ Optional defaults:
 
 - `FRAPPE_REMOTE_USER=frappe`
 - `FRAPPE_LOCAL_BACKUP_ROOT=/data/frappe-backups`
+- `FRAPPE_DOCKER_CONTAINER` (required when `FRAPPE_REMOTE_MODE=docker`)
 - `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID`
+
+### Docker / fm mode
+
+If your Frappe/ERPNext is managed via **Docker/fm**, set:
+
+- `FRAPPE_REMOTE_MODE=docker`
+- `FRAPPE_DOCKER_CONTAINER=<container_name>`
+
+In this mode `fb` will:
+
+- Run `bench` inside the container via `docker exec`
+- Stage backup artifacts from container → remote host `/tmp` via `docker cp`
+- Pull them to the backup server via `rsync` (still pull-based)
+
+Tip: to find your container name on the remote host, run `docker ps` and pick the Frappe/ERPNext container that has `bench` available.
 
 Sites registry:
 

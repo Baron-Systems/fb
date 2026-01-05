@@ -56,6 +56,11 @@ def run_backup_for_site(
         # Pull artifacts into date directory.
         rsync_pull_files(cfg, remote_paths=[p for p in remote_files if p], local_dir=dest_dir, dry_run=dry_run)
 
+        # Docker mode stages artifacts onto remote host /tmp; clean up after successful pull.
+        stage_dir = artifacts.get("stage_dir")
+        if stage_dir:
+            remote.rm_rf(stage_dir, dry_run=dry_run)
+
         if not dry_run:
             pulled_paths["db"] = _pick_file(dest_dir, suffix="database.sql.gz")
             pulled_paths["public"] = _pick_file(dest_dir, suffix="files.tar")
