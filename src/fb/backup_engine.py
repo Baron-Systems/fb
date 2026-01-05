@@ -119,26 +119,27 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
     ensure_dir(dest_dir, dry_run=dry_run)
 
     # remote command: use heredoc stdin execution (fm doesn't accept extra args in many builds).
+    # Keep stdout clean for the tar.gz stream: fm stdout is redirected to stderr at invocation.
     inner_lines = "\n".join(
         [
             "set -euo pipefail",
-            f"cd {shlex.quote(cfg.bench_path)}",
             f"bench --site {site} backup --with-files",
         ]
     )
     fm_bin = getattr(cfg, "fm_bin", "/home/baron/.local/bin/fm")
     fm_target = getattr(cfg, "remote_bench", None) or site
+    backup_dir = f"{cfg.bench_path.rstrip('/')}/sites/{site}/private/backups"
     remote_script = "\n".join(
         [
             "set -euo pipefail",
+            f"test -d {shlex.quote(cfg.bench_path)} || {{ echo 'ERR=FRAPPE_BENCH_PATH not found: {cfg.bench_path}' 1>&2; exit 2; }}",
             # Ensure any fm/bench output does NOT contaminate the tar.gz stream.
             # Many fm builds print banners/prompts to stdout; redirect fm stdout to stderr.
-            f"cd {shlex.quote(cfg.bench_path)}",
             f"{shlex.quote(fm_bin)} shell {shlex.quote(fm_target)} 1>&2 <<'EOF'",
             inner_lines,
             "EOF",
-            f"cd sites/{site}/private/backups",
-            "tar -czf - .",
+            f"test -d {shlex.quote(backup_dir)} || {{ echo 'ERR=Backup dir not found: {backup_dir}' 1>&2; exit 2; }}",
+            f"tar -C {shlex.quote(backup_dir)} -czf - .",
         ]
     )
 
