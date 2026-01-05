@@ -153,6 +153,7 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
 
     ssh_argv = [
         "ssh",
+        "-T",
         "-o",
         "BatchMode=yes",
         "-o",
@@ -167,7 +168,9 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
         "IdentitiesOnly=yes",
         f"{cfg.remote_user}@{cfg.remote_host}",
         "bash",
-        "-lc",
+        "--noprofile",
+        "--norc",
+        "-c",
         remote_script,
     ]
     tar_argv = ["tar", "-xzf", "-", "-C", str(dest_dir)]
