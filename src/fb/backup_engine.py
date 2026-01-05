@@ -119,34 +119,33 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
     ensure_dir(dest_dir, dry_run=dry_run)
 
     # remote command: use heredoc stdin execution (fm doesn't accept extra args in many builds).
-    # Keep stdout clean for the tar.gz stream: fm stdout is redirected to stderr at invocation.
+    # Hard requirement: keep the pipe's stdout clean and send ONLY the tar.gz bytes to it.
+    # We do that by:
+    # - keeping stdout redirected to stderr for the whole remote script
+    # - opening FD 3 as the original stdout
+    # - writing tar output to /proc/self/fd/3 from inside the fm shell
     inner_lines = "\n".join(
         [
             "set -euo pipefail",
+            f"cd {shlex.quote(cfg.bench_path)}",
             f"bench --site {site} backup --with-files",
+            f"cd sites/{site}/private/backups",
+            # Write the stream to FD 3 explicitly to avoid any stdout contamination.
+            "tar -czf /proc/self/fd/3 .",
         ]
     )
     fm_bin = getattr(cfg, "fm_bin", "/home/baron/.local/bin/fm")
     fm_target = getattr(cfg, "remote_bench", None) or site
-    backup_dir = f"{cfg.bench_path.rstrip('/')}/sites/{site}/private/backups"
     remote_script = "\n".join(
         [
             "set -euo pipefail",
-            # IMPORTANT:
-            # Keep stdout *clean* for the tar.gz stream.
-            # Some fm/bench setups print banners/prompts to stdout even when running non-interactively.
-            # Strategy:
-            # - Redirect stdout -> stderr for the entire script
-            # - Send ONLY the tar.gz bytes to the original stdout via FD 3
             "exec 3>&1",
             "exec 1>&2",
             f"test -d {shlex.quote(cfg.bench_path)} || {{ echo 'ERR=FRAPPE_BENCH_PATH not found: {cfg.bench_path}'; exit 2; }}",
-            f"{shlex.quote(fm_bin)} shell {shlex.quote(fm_target)} <<'EOF'",
+            # Redirect all fm/bench output to stderr; tar writes to FD 3 explicitly.
+            f"{shlex.quote(fm_bin)} shell {shlex.quote(fm_target)} <<'FMEOF' 1>&2",
             inner_lines,
-            "EOF",
-            f"test -d {shlex.quote(backup_dir)} || {{ echo 'ERR=Backup dir not found: {backup_dir}'; exit 2; }}",
-            # Stream tar.gz to the original stdout (FD 3) only.
-            f"tar -C {shlex.quote(backup_dir)} -czf - . >&3",
+            "FMEOF",
             "exec 3>&-",
         ]
     )
