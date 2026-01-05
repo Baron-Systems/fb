@@ -122,6 +122,7 @@ def _fm_stream_backup(cfg: Config, site: str, dest_dir: Path, *, dry_run: bool) 
     inner_lines = "\n".join(
         [
             "set -euo pipefail",
+            f"cd {shlex.quote(cfg.bench_path)}",
             f"bench --site {site} backup --with-files",
             f"cd sites/{site}/private/backups",
             "tar -czf - .",

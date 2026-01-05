@@ -136,13 +136,29 @@ def run_pipe(
 
     if check:
         if left.returncode not in (0, None):
+            msg = []
+            if out_l:
+                msg.append("stdout:\n" + out_l.decode(errors="replace").rstrip())
+            if err_l:
+                msg.append("stderr:\n" + err_l.decode(errors="replace").rstrip())
             raise FBError(
-                f"Pipe left command failed ({left.returncode}): {_shlex.join(argv_left)}\n{(err_l or b'').decode(errors='replace')}".rstrip(),
+                (
+                    f"Pipe left command failed ({left.returncode}): {_shlex.join(argv_left)}\n"
+                    + ("\n".join(msg) if msg else "(no output)")
+                ).rstrip(),
                 exit_code=1,
             )
         if right.returncode not in (0, None):
+            msg = []
+            if out_r:
+                msg.append("stdout:\n" + out_r.decode(errors="replace").rstrip())
+            if err_r:
+                msg.append("stderr:\n" + err_r.decode(errors="replace").rstrip())
             raise FBError(
-                f"Pipe right command failed ({right.returncode}): {_shlex.join(argv_right)}\n{(err_r or b'').decode(errors='replace')}".rstrip(),
+                (
+                    f"Pipe right command failed ({right.returncode}): {_shlex.join(argv_right)}\n"
+                    + ("\n".join(msg) if msg else "(no output)")
+                ).rstrip(),
                 exit_code=1,
             )
 
