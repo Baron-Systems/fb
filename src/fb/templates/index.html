@@ -13,7 +13,7 @@
     </div>
     <form method="post" action="/api/maintenance">
       <input type="hidden" name="enabled" value="{{ '0' if maintenance else '1' }}" />
-      <input type="hidden" name="_csrf" value="{{ csrf }}" />
+      <input type="hidden" name="csrf_token" value="{{ csrf }}" />
       <button type="submit">
         {{ 'Disable' if maintenance else 'Enable' }}
       </button>

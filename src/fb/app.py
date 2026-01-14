@@ -106,9 +106,9 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
         )
 
     @app.post("/api/maintenance")
-    def set_maintenance(request: Request, enabled: str = Form(...), _csrf: str = Form(...)) -> RedirectResponse:
+    def set_maintenance(request: Request, enabled: str = Form(...), csrf_token: str = Form(...)) -> RedirectResponse:
         want = request.session.get("csrf")
-        if not want or _csrf != want:
+        if not want or csrf_token != want:
             return RedirectResponse("/", status_code=303)
         value = enabled.lower() in {"1", "true", "yes", "on"}
         kv_set(cx, "dashboard.maintenance", value)
