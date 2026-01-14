@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="row">
+  <h3 style="margin:0">Agent: {{ agent.agent_id }}</h3>
+  <a href="/"><button type="button">Back</button></a>
+</div>
+
+<div class="card">
+  <div class="muted">Base URL: <code>{{ agent.base_url }}</code></div>
+  <div class="muted">Last seen (unix): {{ agent.last_seen }}</div>
+</div>
+
+{% set stacks = agent.meta.get("stacks", []) %}
+{% for st in stacks %}
+  <div class="card">
+    <div><strong>Stack:</strong> <code>{{ st.get("stack") or st.get("name") }}</code></div>
+    <div class="muted">Sites: {{ (st.get("sites") or [])|length }}</div>
+    <div style="margin-top:0.5rem">
+      {% for site in (st.get("sites") or []) %}
+        <div class="row" style="justify-content: space-between; margin: 0.25rem 0">
+          <div><code>{{ site }}</code></div>
+          <button
+            hx-post="/api/site/{{ agent.agent_id }}/{{ st.get('stack') or st.get('name') }}/{{ site }}/backup"
+            hx-headers='{"X-CSRF-Token":"{{ csrf }}"}'
+            hx-target="#result"
+            hx-swap="innerHTML"
+            type="button"
+          >
+            Backup
+          </button>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% endfor %}
+
+<div class="card">
+  <div><strong>Last action result</strong></div>
+  <pre id="result" class="muted" style="white-space: pre-wrap; overflow-x: auto"></pre>
+</div>
+
+{% endblock %}
+
+

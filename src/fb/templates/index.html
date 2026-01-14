@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <div class="row">
+    <div>
+      <div><strong>Maintenance Mode</strong></div>
+      {% if maintenance %}
+        <div class="muted danger">Enabled — backups are blocked</div>
+      {% else %}
+        <div class="muted">Disabled</div>
+      {% endif %}
+    </div>
+    <form method="post" action="/api/maintenance">
+      <input type="hidden" name="enabled" value="{{ '0' if maintenance else '1' }}" />
+      <input type="hidden" name="_csrf" value="{{ csrf }}" />
+      <button type="submit">
+        {{ 'Disable' if maintenance else 'Enable' }}
+      </button>
+    </form>
+  </div>
+</div>
+
+<h3>Agents</h3>
+
+{% if agents|length == 0 %}
+  <div class="card">
+    <div>No agents registered yet.</div>
+    <div class="muted">Start agents with <code>fb-agent run</code>. They will auto-announce on the LAN.</div>
+  </div>
+{% endif %}
+
+{% for a in agents %}
+  <div class="card">
+    <div class="row">
+      <div style="flex:1">
+        <div><strong>{{ a.agent_id }}</strong></div>
+        <div class="muted">URL: <code>{{ a.base_url }}</code></div>
+      </div>
+      <a href="/agent/{{ a.agent_id }}"><button type="button">Open</button></a>
+    </div>
+    {% if a.meta and a.meta.get("stacks") %}
+      <div class="muted">Stacks: {{ a.meta.get("stacks")|length }}</div>
+    {% endif %}
+  </div>
+{% endfor %}
+
+{% endblock %}
+
+
