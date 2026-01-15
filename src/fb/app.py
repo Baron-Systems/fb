@@ -255,10 +255,28 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
         for br in backup_rows:
             manifest = json.loads(br["manifest_json"] or "{}")
             timestamp = time_module.strftime("%Y-%m-%d %H:%M:%S", time_module.gmtime(br["ts"]))
+            
+            # Calculate backup size
+            backup_dir = Path(br["backup_dir"])
+            size_str = "N/A"
+            if backup_dir.exists():
+                total_size = 0
+                for file_path in backup_dir.rglob('*'):
+                    if file_path.is_file():
+                        total_size += file_path.stat().st_size
+                
+                if total_size > 0:
+                    if total_size < 1024:
+                        size_str = f"{total_size} B"
+                    elif total_size < 1024 * 1024:
+                        size_str = f"{total_size / 1024:.1f} KB"
+                    else:
+                        size_str = f"{total_size / (1024 * 1024):.2f} MB"
+            
             backups.append({
                 "id": br["id"],
                 "timestamp": timestamp,
-                "size": "N/A",  # TODO: calculate size
+                "size": size_str,
                 "components": "database, files, private files",
                 "ok": manifest.get("ok", False),
                 "error": manifest.get("error", ""),
@@ -290,13 +308,31 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
         for row in rows:
             manifest = json.loads(row["manifest_json"] or "{}")
             timestamp = time_module.strftime("%Y-%m-%d %H:%M:%S", time_module.gmtime(row["ts"]))
+            
+            # Calculate backup size
+            backup_dir = Path(row["backup_dir"])
+            size_str = "N/A"
+            if backup_dir.exists():
+                total_size = 0
+                for file_path in backup_dir.rglob('*'):
+                    if file_path.is_file():
+                        total_size += file_path.stat().st_size
+                
+                if total_size > 0:
+                    if total_size < 1024:
+                        size_str = f"{total_size} B"
+                    elif total_size < 1024 * 1024:
+                        size_str = f"{total_size / 1024:.1f} KB"
+                    else:
+                        size_str = f"{total_size / (1024 * 1024):.2f} MB"
+            
             backups.append({
                 "id": row["id"],
                 "agent_id": row["agent_id"],
                 "stack": row["stack"],
                 "site": row["site"],
                 "timestamp": timestamp,
-                "size": "N/A",
+                "size": size_str,
                 "ok": manifest.get("ok", False),
             })
         
