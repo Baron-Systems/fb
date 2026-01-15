@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1 class="page-title">Agent: {{ agent.agent_id }}</h1>
+  <p class="page-subtitle">Hostname: <code>{{ agent.hostname }}</code></p>
+</div>
+
+<div class="card">
+  <div class="row row-between">
+    <div>
+      <div><strong>Base URL:</strong> <code>{{ agent.base_url }}</code></div>
+      <div class="muted">Last seen: {{ agent.last_seen_formatted }}</div>
+    </div>
+    <div>
+      <div><strong>Status:</strong> 
+        {% if agent.is_online %}
+          <span class="status-badge status-online">Online</span>
+        {% else %}
+          <span class="status-badge status-offline">Offline</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Sites ({{ agent.sites|length }})</div>
+  
+  {% if agent.sites|length == 0 %}
+  <div class="empty-state" style="padding: 2rem;">
+    <div>No sites discovered on this agent.</div>
+    <div class="muted">The agent may not have discovered any fm stacks yet.</div>
+  </div>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th>Site Name</th>
+        <th class="text-right">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for site in agent.sites %}
+      <tr>
+        <td><strong>{{ site.name }}</strong></td>
+        <td class="text-right">
+          <a href="/sites/{{ agent.agent_id }}/{{ site.stack }}/{{ site.name }}" class="btn">View Details</a>
+          <button
+            hx-post="/api/sites/{{ agent.agent_id }}/{{ site.stack }}/{{ site.name }}/backup"
+            hx-headers='{"X-CSRF-Token":"{{ csrf }}"}'
+            hx-indicator="#backup-spinner"
+            class="btn btn-primary"
+          >
+            Backup Now
+          </button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div id="backup-spinner" class="htmx-indicator" style="margin-top: 1rem; color: #666;">
+    ⏳ Backup in progress...
+  </div>
+  {% endif %}
+</div>
+
+<div class="row">
+  <a href="/agents" class="btn">Back to Agents</a>
+</div>
+
+{% endblock %}
+

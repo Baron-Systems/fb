@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1 class="page-title">Backups</h1>
+  <p class="page-subtitle">All backups across all agents and sites</p>
+</div>
+
+<div class="card">
+  <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+    <div><strong>{{ total_backups }}</strong> backup(s) stored</div>
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+      <input 
+        type="text" 
+        id="search-input" 
+        placeholder="🔍 Search by site, agent, or date..." 
+        style="padding: 0.5rem 1rem; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem; min-width: 250px;"
+        onkeyup="filterBackups()"
+      />
+      <button onclick="clearSearch()" class="btn" style="padding: 0.5rem 1rem;">Clear</button>
+    </div>
+  </div>
+</div>
+
+{% if backups|length == 0 %}
+<div class="card empty-state">
+  <div style="font-size: 2rem; margin-bottom: 1rem;">💾</div>
+  <div>No backups found.</div>
+  <div class="muted">Backups will appear here after running backup operations.</div>
+</div>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Site</th>
+      <th>Agent</th>
+      <th>Date & Time</th>
+      <th>Size</th>
+      <th>Status</th>
+      <th class="text-right">Actions</th>
+    </tr>
+  </thead>
+  <tbody id="backups-table-body">
+    {% for backup in backups %}
+    <tr class="backup-row" data-site="{{ backup.site }}" data-agent="{{ backup.agent_id }}" data-timestamp="{{ backup.timestamp }}">
+      <td><strong>{{ backup.site }}</strong></td>
+      <td><code>{{ backup.agent_id }}</code></td>
+      <td><code>{{ backup.timestamp }}</code></td>
+      <td class="muted">{{ backup.size }}</td>
+      <td>
+        {% if backup.ok %}
+          <span class="status-badge status-success">Success</span>
+        {% else %}
+          <span class="status-badge status-failed">Failed</span>
+        {% endif %}
+      </td>
+      <td class="text-right">
+        <a href="/sites/{{ backup.agent_id }}/{{ backup.stack }}/{{ backup.site }}" class="btn">View Site</a>
+        {% if backup.ok %}
+          <a href="/api/backups/{{ backup.id }}/download" class="btn">Download</a>
+        {% endif %}
+        <button
+          hx-delete="/api/backups/{{ backup.id }}"
+          hx-headers='{"X-CSRF-Token":"{{ csrf }}"}'
+          hx-confirm="Delete this backup?"
+          hx-target="closest tr"
+          hx-swap="outerHTML"
+          class="btn btn-danger"
+        >
+          Delete
+        </button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<script>
+  function filterBackups() {
+    const searchTerm = document.getElementById('search-input').value.toLowerCase();
+    const rows = document.querySelectorAll('.backup-row');
+    let visibleCount = 0;
+    
+    rows.forEach(row => {
+      const site = row.dataset.site.toLowerCase();
+      const agent = row.dataset.agent.toLowerCase();
+      const timestamp = row.dataset.timestamp.toLowerCase();
+      
+      if (site.includes(searchTerm) || agent.includes(searchTerm) || timestamp.includes(searchTerm)) {
+        row.style.display = '';
+        visibleCount++;
+      } else {
+        row.style.display = 'none';
+      }
+    });
+    
+    // Update count
+    const card = document.querySelector('.card');
+    if (card) {
+      const countEl = card.querySelector('strong');
+      if (countEl) {
+        if (searchTerm) {
+          countEl.textContent = `${visibleCount} backup(s) found`;
+        } else {
+          countEl.textContent = `{{ total_backups }} backup(s) stored`;
+        }
+      }
+    }
+  }
+  
+  function clearSearch() {
+    document.getElementById('search-input').value = '';
+    filterBackups();
+  }
+</script>
+
+{% endblock %}
+

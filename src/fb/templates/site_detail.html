@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1 class="page-title">{{ site.name }}</h1>
+  <p class="page-subtitle">Agent: <code>{{ site.agent_id }}</code></p>
+</div>
+
+<!-- SECTION 1: SITE ACTIONS -->
+<div class="card">
+  <div class="card-header">Site Actions</div>
+  <div class="row">
+    <button
+      hx-post="/api/sites/{{ site.agent_id }}/{{ site.stack }}/{{ site.name }}/backup"
+      hx-headers='{"X-CSRF-Token":"{{ csrf }}"}'
+      hx-target="#backup-result"
+      hx-indicator="#backup-spinner"
+      hx-swap="innerHTML"
+      class="btn btn-primary"
+      id="backup-btn"
+      onclick="showToast('Starting backup...', 'info')"
+    >
+      Backup Now
+    </button>
+    <button
+      onclick="document.getElementById('schedule-editor').style.display='block'"
+      class="btn"
+    >
+      Schedule
+    </button>
+    <button
+      hx-post="/api/agents/{{ site.agent_id }}/refresh"
+      hx-headers='{"X-CSRF-Token":"{{ csrf }}"}'
+      hx-indicator="#refresh-spinner"
+      class="btn"
+    >
+      Refresh
+    </button>
+  </div>
+  <div id="backup-spinner" class="htmx-indicator" style="margin-top: 1rem; color: #666;">
+    ⏳ Backup in progress...
+  </div>
+  <div id="refresh-spinner" class="htmx-indicator" style="margin-top: 1rem; color: #666;">
+    ⏳ Refreshing...
+  </div>
+  <div id="backup-result" style="margin-top: 1rem;"></div>
+</div>
+
+<script>
+  // Listen for backup completion
+  document.body.addEventListener('htmx:afterSwap', function(event) {
+    if (event.detail.target && event.detail.target.id === 'backup-result') {
+      const result = event.detail.target;
+      const text = result.textContent || result.innerText || '';
+      
+      if (text.includes('success') || text.includes('Success') || text.includes('completed')) {
+        showToast('✅ Backup completed successfully!', 'success');
+      } else if (text.includes('error') || text.includes('Error') || text.includes('failed')) {
+        showToast('❌ Backup failed. Please check the details.', 'error');
+      }
+    }
+  });
+  
+  // Listen for delete operations
+  document.body.addEventListener('htmx:afterSwap', function(event) {
+    if (event.detail.target && event.detail.target.tagName === 'TR') {
+      showToast('🗑️ Backup deleted successfully', 'success');
+    }
+  });
+</script>
+
+<!-- SECTION 2: BACKUP SCHEDULE -->
+<div class="card">
+  <div class="card-header">Backup Schedule</div>
+  
+  <div id="schedule-display">
+    <table style="border: none;">
+      <tr>
+        <td style="border: none; width: 200px;"><strong>Status:</strong></td>
+        <td style="border: none;">
+          {% if site.schedule.enabled %}
+            <span class="status-badge status-enabled">Enabled</span>
+          {% else %}
+            <span class="status-badge status-disabled">Disabled</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td style="border: none;"><strong>Frequency:</strong></td>
+        <td style="border: none;">{{ site.schedule.frequency|capitalize }}</td>
+      </tr>
+      <tr>
+        <td style="border: none;"><strong>Time:</strong></td>
+        <td style="border: none;">{{ site.schedule.time }} UTC</td>
+      </tr>
+      <tr>
+        <td style="border: none;"><strong>Retention:</strong></td>
+        <td style="border: none;">Keep last {{ site.schedule.retention }} backups</td>
+      </tr>
+    </table>
+    <button onclick="document.getElementById('schedule-editor').style.display='block'; document.getElementById('schedule-display').style.display='none';" class="btn" style="margin-top: 1rem;">
+      Edit Schedule
+    </button>
+  </div>
+  
+  <div id="schedule-editor" style="display: none;">
+    <form method="post" action="/api/sites/{{ site.agent_id }}/{{ site.stack }}/{{ site.name }}/schedule">
+      <div style="margin-bottom: 1rem;">
+        <label><strong>Frequency:</strong></label><br/>
+        <select name="frequency" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; width: 200px;">
+          <option value="daily" {% if site.schedule.frequency == 'daily' %}selected{% endif %}>Daily</option>
+          <option value="weekly" {% if site.schedule.frequency == 'weekly' %}selected{% endif %}>Weekly</option>
+          <option value="monthly" {% if site.schedule.frequency == 'monthly' %}selected{% endif %}>Monthly</option>
+          <option value="disabled" {% if not site.schedule.enabled %}selected{% endif %}>Disabled</option>
+        </select>
+      </div>
+      <div style="margin-bottom: 1rem;">
+        <label><strong>Time (UTC):</strong></label><br/>
+        <input type="time" name="time" value="{{ site.schedule.time }}" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;" />
+      </div>
+      <div style="margin-bottom: 1rem;">
+        <label><strong>Retention (backups to keep):</strong></label><br/>
+        <input type="number" name="retention" value="{{ site.schedule.retention }}" min="1" max="365" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; width: 100px;" />
+      </div>
+      <input type="hidden" name="csrf_token" value="{{ csrf }}" />
+      <div class="row">
+        <button type="submit" class="btn btn-primary">Save Schedule</button>
+        <button type="button" onclick="document.getElementById('schedule-editor').style.display='none'; document.getElementById('schedule-display').style.display='block';" class="btn">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- SECTION 3: BACKUPS LIST -->
+<div class="card">
+  <div class="card-header">Backups ({{ backups|length }})</div>
+  
+  {% if backups|length == 0 %}
+  <div class="empty-state" style="padding: 2rem;">
+    <div>No backups available for this site.</div>
+    <div class="muted">Click "Backup Now" to create the first backup.</div>
+  </div>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th>Date & Time</th>
+        <th>Size</th>
+        <th>Components</th>
+        <th>Status</th>
+        <th>Rating</th>
+        <th class="text-right">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for backup in backups %}
+      <tr id="backup-row-{{ backup.id }}">
+        <td><code>{{ backup.timestamp }}</code></td>
+        <td class="muted">{{ backup.size }}</td>
+        <td class="muted">{{ backup.components }}</td>
+        <td>
+          {% if backup.ok %}
+            <span class="status-badge status-success">✓ Success</span>
+          {% else %}
+            <span class="status-badge status-failed">✗ Failed</span>
+          {% endif %}
+        </td>
+        <td>
+          <div id="rating-display-{{ backup.id }}" style="display: {% if backup.rating %}block{% else %}none{% endif %};">
+            <span class="rating-stars" id="rating-stars-{{ backup.id }}">{% for i in range(1, 6) %}{% if i <= (backup.rating or 0) %}★{% else %}☆{% endif %}{% endfor %}</span>
+            <button onclick="showRatingForm({{ backup.id }})" class="btn" style="padding: 0.2rem 0.5rem; font-size: 0.8rem;">Edit</button>
+          </div>
+          <div id="rating-form-{{ backup.id }}" style="display: {% if backup.rating %}none{% else %}block{% endif %};">
+            <button onclick="rateBackup({{ backup.id }}, 1)" class="btn-star">☆</button>
+            <button onclick="rateBackup({{ backup.id }}, 2)" class="btn-star">☆</button>
+            <button onclick="rateBackup({{ backup.id }}, 3)" class="btn-star">☆</button>
+            <button onclick="rateBackup({{ backup.id }}, 4)" class="btn-star">☆</button>
+            <button onclick="rateBackup({{ backup.id }}, 5)" class="btn-star">☆</button>
+          </div>
+        </td>
+        <td class="text-right">
+          {% if backup.ok %}
+            <a href="/api/backups/{{ backup.id }}/download" class="btn">⬇ Download</a>
+          {% else %}
+            <button onclick="alert('Execution details:\n{{ backup.error }}')" class="btn">⚠ View Details</button>
+          {% endif %}
+          <button
+            hx-delete="/api/backups/{{ backup.id }}"
+            hx-headers='{"X-CSRF-Token":"{{ csrf }}"}'
+            hx-confirm="Delete this backup?"
+            hx-target="closest tr"
+            hx-swap="outerHTML"
+            class="btn btn-danger"
+          >
+            🗑 Delete
+          </button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<style>
+  .rating-stars {
+    color: #ffc107;
+    font-size: 1.2rem;
+    margin-right: 0.5rem;
+  }
+  
+  .btn-star {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #ddd;
+    padding: 0 0.2rem;
+  }
+  
+  .btn-star:hover {
+    color: #ffc107;
+  }
+</style>
+
+<script>
+  function showRatingForm(backupId) {
+    document.getElementById('rating-display-' + backupId).style.display = 'none';
+    document.getElementById('rating-form-' + backupId).style.display = 'block';
+  }
+  
+  function rateBackup(backupId, rating) {
+    fetch('/api/backups/' + backupId + '/rate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating: rating })
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        // Update stars display
+        const starsEl = document.getElementById('rating-stars-' + backupId);
+        let stars = '';
+        for (let i = 1; i <= 5; i++) {
+          stars += i <= rating ? '★' : '☆';
+        }
+        starsEl.textContent = stars;
+        
+        // Hide form, show display
+        document.getElementById('rating-form-' + backupId).style.display = 'none';
+        document.getElementById('rating-display-' + backupId).style.display = 'block';
+      } else {
+        alert('Error: ' + (data.error || 'Unknown error'));
+      }
+    })
+    .catch(e => alert('Error: ' + e.message));
+  }
+</script>
+
+{% endblock %}
+

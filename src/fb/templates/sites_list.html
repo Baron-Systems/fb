@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1 class="page-title">Sites</h1>
+  <p class="page-subtitle">All application sites across all agents</p>
+</div>
+
+<div class="card">
+  <strong>{{ sites|length }}</strong> site(s) discovered
+</div>
+
+{% if sites|length == 0 %}
+<div class="card empty-state">
+  <div style="font-size: 2rem; margin-bottom: 1rem;">🌐</div>
+  <div>No sites discovered yet.</div>
+  <div class="muted">Sites will appear here once agents discover them via <code>fm list</code>.</div>
+</div>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Site Name</th>
+      <th>Agent</th>
+      <th>Status</th>
+      <th>Last Backup</th>
+      <th>Schedule</th>
+      <th class="text-right">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for site in sites %}
+    <tr>
+      <td><strong>{{ site.name }}</strong></td>
+      <td><code>{{ site.agent_id }}</code></td>
+      <td><span class="status-badge status-online">Running</span></td>
+      <td class="muted">{{ site.last_backup or 'Never' }}</td>
+      <td>
+        {% if site.schedule_enabled %}
+          <span class="status-badge status-enabled">Enabled</span>
+        {% else %}
+          <span class="status-badge status-disabled">Disabled</span>
+        {% endif %}
+      </td>
+      <td class="text-right">
+        <a href="/sites/{{ site.agent_id }}/{{ site.stack }}/{{ site.name }}" class="btn">View</a>
+        <button
+          hx-post="/api/sites/{{ site.agent_id }}/{{ site.stack }}/{{ site.name }}/backup"
+          hx-headers='{"X-CSRF-Token":"{{ csrf }}"}'
+          hx-indicator="#backup-spinner"
+          class="btn btn-primary"
+        >
+          Backup Now
+        </button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<div id="backup-spinner" class="htmx-indicator" style="margin-top: 1rem; color: #666;">
+  ⏳ Backup in progress...
+</div>
+{% endif %}
+
+{% endblock %}
+

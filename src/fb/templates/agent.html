@@ -1,44 +1,137 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="row">
+<div class="row" style="justify-content: space-between;">
   <h3 style="margin:0">Agent: {{ agent.agent_id }}</h3>
-  <a href="/"><button type="button">Back</button></a>
+  <div class="row">
+    <button
+      hx-post="/api/agents/{{ agent.agent_id }}/refresh"
+      hx-headers='{"X-CSRF-Token":"{{ csrf }}"}'
+      hx-swap="none"
+      onclick="location.reload()"
+    >
+      Refresh Sites
+    </button>
+    <a href="/"><button type="button">Back</button></a>
+  </div>
 </div>
 
 <div class="card">
-  <div class="muted">Base URL: <code>{{ agent.base_url }}</code></div>
-  <div class="muted">Last seen (unix): {{ agent.last_seen }}</div>
+  <div class="row" style="justify-content: space-between;">
+    <div>
+      <div><strong>Base URL:</strong> <code>{{ agent.base_url }}</code></div>
+      <div class="muted">Last seen: {{ agent.last_seen_formatted }}</div>
+    </div>
+    <div>
+      <div><strong>Status:</strong> 
+        {% if agent.is_online %}
+          <span style="color: #0a0;">● Online</span>
+        {% else %}
+          <span class="danger">● Offline</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
 </div>
 
 {% set stacks = agent.meta.get("stacks", []) %}
+
+{% if stacks|length == 0 %}
+<div class="card">
+  <div>No sites found on this agent.</div>
+  <div class="muted">The agent may not have discovered any fm stacks yet. Click "Refresh Sites" to update.</div>
+</div>
+{% endif %}
+
 {% for st in stacks %}
   <div class="card">
-    <div><strong>Stack:</strong> <code>{{ st.get("stack") or st.get("name") }}</code></div>
-    <div class="muted">Sites: {{ (st.get("sites") or [])|length }}</div>
-    <div style="margin-top:0.5rem">
-      {% for site in (st.get("sites") or []) %}
-        <div class="row" style="justify-content: space-between; margin: 0.25rem 0">
-          <div><code>{{ site }}</code></div>
-          <button
-            hx-post="/api/site/{{ agent.agent_id }}/{{ st.get('stack') or st.get('name') }}/{{ site }}/backup"
-            hx-headers='{"X-CSRF-Token":"{{ csrf }}"}'
-            hx-target="#result"
-            hx-swap="innerHTML"
-            type="button"
-          >
-            Backup
-          </button>
-        </div>
-      {% endfor %}
+    <div class="row" style="justify-content: space-between; align-items: center;">
+      <div>
+        <strong>Stack:</strong> <code>{{ st.get("stack") or st.get("name") }}</code>
+        <span class="muted"> — {{ (st.get("sites") or [])|length }} site(s)</span>
+      </div>
     </div>
+    
+    {% for site in (st.get("sites") or []) %}
+      <div class="card" style="margin: 0.5rem 0; background: #fafafa;">
+        <div class="row" style="justify-content: space-between; align-items: center;">
+          <div style="flex: 1;">
+            <div><strong>{{ site }}</strong></div>
+            {% set site_backups = site_backup_counts.get(agent.agent_id, {}).get(st.get('stack') or st.get('name'), {}).get(site, 0) %}
+            <div class="muted">{{ site_backups }} backup(s) available</div>
+          </div>
+          <div class="row">
+            <button
+              hx-post="/api/site/{{ agent.agent_id }}/{{ st.get('stack') or st.get('name') }}/{{ site }}/backup"
+              hx-headers='{"X-CSRF-Token":"{{ csrf }}"}'
+              hx-target="#result-{{ site|replace('.', '-') }}"
+              hx-swap="innerHTML"
+              hx-indicator="#spinner-{{ site|replace('.', '-') }}"
+              type="button"
+            >
+              Backup Now
+            </button>
+            <button
+              onclick="document.getElementById('schedule-{{ site|replace('.', '-') }}').style.display='block'"
+              type="button"
+              style="background: #fff;"
+            >
+              Schedule
+            </button>
+          </div>
+        </div>
+        
+        <div id="schedule-{{ site|replace('.', '-') }}" style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #ddd;">
+          <form method="post" action="/api/site/{{ agent.agent_id }}/{{ st.get('stack') or st.get('name') }}/{{ site }}/schedule">
+            <div style="margin-bottom: 0.5rem;">
+              <strong>Schedule Backup:</strong>
+            </div>
+            <div class="row" style="align-items: flex-end;">
+              <div>
+                <label style="font-size: 0.9rem;">Frequency:</label><br/>
+                <select name="frequency" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;">
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size: 0.9rem;">Time (UTC):</label><br/>
+                <input type="time" name="time" value="02:00" style="padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;" />
+              </div>
+              <input type="hidden" name="csrf_token" value="{{ csrf }}" />
+              <button type="submit" style="padding: 0.5rem 1rem;">Save Schedule</button>
+              <button type="button" onclick="document.getElementById('schedule-{{ site|replace('.', '-') }}').style.display='none'" style="background: #fff;">Cancel</button>
+            </div>
+          </form>
+        </div>
+        
+        <div id="result-{{ site|replace('.', '-') }}" style="margin-top: 0.5rem;"></div>
+        <div id="spinner-{{ site|replace('.', '-') }}" class="htmx-indicator" style="margin-top: 0.5rem; color: #666;">
+          ⏳ Backing up...
+        </div>
+      </div>
+    {% endfor %}
   </div>
 {% endfor %}
 
 <div class="card">
-  <div><strong>Last action result</strong></div>
-  <pre id="result" class="muted" style="white-space: pre-wrap; overflow-x: auto"></pre>
+  <div><strong>Recent Operations</strong></div>
+  <pre id="result" class="muted" style="white-space: pre-wrap; overflow-x: auto; max-height: 300px; overflow-y: auto;"></pre>
 </div>
+
+<style>
+  .htmx-indicator {
+    display: none;
+  }
+  .htmx-request .htmx-indicator {
+    display: inline;
+  }
+  .htmx-request.htmx-indicator {
+    display: inline;
+  }
+</style>
 
 {% endblock %}
 

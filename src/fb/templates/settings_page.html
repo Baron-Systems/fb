@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1 class="page-title">Settings</h1>
+  <p class="page-subtitle">Global system configuration</p>
+</div>
+
+<div class="card">
+  <div class="card-header">Backup Storage</div>
+  <table style="border: none;">
+    <tr>
+      <td style="border: none; width: 250px;"><strong>Backup Root:</strong></td>
+      <td style="border: none;"><code>{{ settings.backup_root }}</code></td>
+    </tr>
+    <tr>
+      <td style="border: none;"><strong>Description:</strong></td>
+      <td style="border: none;" class="muted">All backups are stored under this directory</td>
+    </tr>
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-header">Scheduler</div>
+  <table style="border: none;">
+    <tr>
+      <td style="border: none; width: 250px;"><strong>Status:</strong></td>
+      <td style="border: none;">
+        <span class="status-badge status-enabled">Running</span>
+      </td>
+    </tr>
+    <tr>
+      <td style="border: none;"><strong>Description:</strong></td>
+      <td style="border: none;" class="muted">Automatically executes scheduled backups for all sites</td>
+    </tr>
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-header">Default Retention Policy</div>
+  <table style="border: none;">
+    <tr>
+      <td style="border: none; width: 250px;"><strong>Keep Last N Backups:</strong></td>
+      <td style="border: none;">{{ settings.retention_keep }}</td>
+    </tr>
+    <tr>
+      <td style="border: none;"><strong>Description:</strong></td>
+      <td style="border: none;" class="muted">Default retention applied to new sites</td>
+    </tr>
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-header">Database</div>
+  <table style="border: none;">
+    <tr>
+      <td style="border: none; width: 250px;"><strong>Database Path:</strong></td>
+      <td style="border: none;"><code>{{ settings.db_path }}</code></td>
+    </tr>
+    <tr>
+      <td style="border: none;"><strong>Type:</strong></td>
+      <td style="border: none;">SQLite</td>
+    </tr>
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-header">Maintenance Mode</div>
+  <form method="post" action="/api/maintenance">
+    <div class="row row-between">
+      <div>
+        {% if settings.maintenance %}
+          <span class="status-badge status-failed">Enabled — backups are blocked</span>
+        {% else %}
+          <span class="status-badge status-success">Disabled</span>
+        {% endif %}
+      </div>
+      <div>
+        <input type="hidden" name="enabled" value="{{ '0' if settings.maintenance else '1' }}" />
+        <input type="hidden" name="csrf_token" value="{{ csrf }}" />
+        <button type="submit" class="btn">
+          {{ 'Disable' if settings.maintenance else 'Enable' }}
+        </button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-header">📱 Telegram Notifications</div>
+  <form method="post" action="/api/settings/telegram">
+    <table style="border: none;">
+      <tr>
+        <td style="border: none; width: 250px;"><strong>Status:</strong></td>
+        <td style="border: none;">
+          {% if telegram.enabled %}
+            <span class="status-badge status-enabled">Enabled</span>
+          {% else %}
+            <span class="status-badge status-disabled">Disabled</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td style="border: none;"><strong>Bot Token:</strong></td>
+        <td style="border: none;">
+          <input 
+            type="text" 
+            name="bot_token" 
+            value="{{ telegram.bot_token }}" 
+            placeholder="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
+            style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;"
+          />
+        </td>
+      </tr>
+      <tr>
+        <td style="border: none;"><strong>Chat ID:</strong></td>
+        <td style="border: none;">
+          <input 
+            type="text" 
+            name="chat_id" 
+            value="{{ telegram.chat_id }}" 
+            placeholder="-1001234567890"
+            style="width: 100%; padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px;"
+          />
+        </td>
+      </tr>
+      <tr>
+        <td style="border: none;"><strong>Enable Notifications:</strong></td>
+        <td style="border: none;">
+          <label style="display: flex; align-items: center; gap: 0.5rem;">
+            <input type="checkbox" name="enabled" value="1" {% if telegram.enabled %}checked{% endif %} />
+            Send notifications on backup success/failure
+          </label>
+        </td>
+      </tr>
+      <tr>
+        <td style="border: none;"></td>
+        <td style="border: none; padding-top: 1rem;">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}" />
+          <button type="submit" class="btn btn-primary">Save Telegram Settings</button>
+        </td>
+      </tr>
+    </table>
+    <div class="muted" style="margin-top: 1rem; font-size: 0.9rem;">
+      <strong>How to get Bot Token:</strong><br>
+      1. Message @BotFather on Telegram<br>
+      2. Create new bot with /newbot<br>
+      3. Copy the token<br><br>
+      <strong>How to get Chat ID:</strong><br>
+      1. Add bot to your channel/group<br>
+      2. Send a message<br>
+      3. Visit: https://api.telegram.org/bot&lt;YOUR_BOT_TOKEN&gt;/getUpdates<br>
+      4. Look for "chat":{"id":-1234567890}
+    </div>
+  </form>
+</div>
+
+{% endblock %}
+

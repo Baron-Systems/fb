@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3>Backups Browser</h3>
+
+<div class="card">
+  <div class="row">
+    <div>
+      <div><strong>Total Backups:</strong> {{ total_backups }}</div>
+      <div class="muted">Across all agents and sites</div>
+    </div>
+    <div>
+      <div><strong>Total Size:</strong> <span class="muted">Calculating...</span></div>
+    </div>
+  </div>
+</div>
+
+{% if backups|length == 0 %}
+<div class="card">
+  <div>No backups found.</div>
+  <div class="muted">Backups will appear here after running backup operations.</div>
+</div>
+{% endif %}
+
+{% for agent_id, agent_data in backups.items() %}
+  <div class="card">
+    <h4>Agent: {{ agent_id }}</h4>
+    {% for stack, stack_data in agent_data.items() %}
+      <div style="margin-left: 1rem; margin-top: 0.5rem;">
+        <strong>Stack:</strong> <code>{{ stack }}</code>
+        {% for site, site_backups in stack_data.items() %}
+          <div style="margin-left: 1rem; margin-top: 0.5rem;">
+            <div class="row" style="justify-content: space-between;">
+              <strong>{{ site }}</strong>
+              <span class="muted">{{ site_backups|length }} backup(s)</span>
+            </div>
+            <table style="width: 100%; margin-top: 0.5rem; border-collapse: collapse;">
+              <thead>
+                <tr style="border-bottom: 1px solid #ddd;">
+                  <th style="text-align: left; padding: 0.5rem;">Timestamp</th>
+                  <th style="text-align: left; padding: 0.5rem;">Status</th>
+                  <th style="text-align: left; padding: 0.5rem;">Location</th>
+                  <th style="text-align: right; padding: 0.5rem;">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for backup in site_backups %}
+                <tr style="border-bottom: 1px solid #eee;">
+                  <td style="padding: 0.5rem;"><code>{{ backup.timestamp }}</code></td>
+                  <td style="padding: 0.5rem;">
+                    {% if backup.ok %}
+                      <span style="color: #0a0;">✓ Success</span>
+                    {% else %}
+                      <span class="danger">✗ Failed</span>
+                    {% endif %}
+                  </td>
+                  <td style="padding: 0.5rem;"><code style="font-size: 0.8rem;">{{ backup.backup_dir }}</code></td>
+                  <td style="padding: 0.5rem; text-align: right;">
+                    <button
+                      hx-delete="/api/backups/{{ backup.id }}"
+                      hx-headers='{"X-CSRF-Token":"{{ csrf }}"}'
+                      hx-confirm="Delete this backup?"
+                      hx-target="closest tr"
+                      hx-swap="outerHTML"
+                      style="background: #fee; border-color: #b00; color: #b00; padding: 0.3rem 0.6rem; font-size: 0.85rem;"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endfor %}
+      </div>
+    {% endfor %}
+  </div>
+{% endfor %}
+
+{% endblock %}
+

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3>Add Agent Manually</h3>
+
+<div class="card">
+  <form method="post" action="/api/agents/add">
+    <div style="margin-bottom: 1rem;">
+      <label for="agent_name"><strong>Agent Name:</strong></label><br/>
+      <input type="text" id="agent_name" name="agent_name" required placeholder="e.g., Production Server 1" style="width: 100%; padding: 0.5rem; margin-top: 0.25rem; border: 1px solid #ddd; border-radius: 4px;" />
+      <div class="muted">Display name for this agent (shown in the UI)</div>
+    </div>
+    
+    <div style="margin-bottom: 1rem;">
+      <label for="agent_id"><strong>Agent ID:</strong></label><br/>
+      <input type="text" id="agent_id" name="agent_id" required style="width: 100%; padding: 0.5rem; margin-top: 0.25rem; border: 1px solid #ddd; border-radius: 4px;" />
+      <div class="muted">Unique identifier for this agent (e.g., production-server-01)</div>
+    </div>
+    
+    <div style="margin-bottom: 1rem;">
+      <label for="base_url"><strong>Base URL:</strong></label><br/>
+      <input type="text" id="base_url" name="base_url" required placeholder="http://192.168.1.100:8888" style="width: 100%; padding: 0.5rem; margin-top: 0.25rem; border: 1px solid #ddd; border-radius: 4px;" />
+      <div class="muted">Full URL where the agent API is accessible</div>
+    </div>
+    
+    <div style="margin-bottom: 1rem;">
+      <label for="shared_secret"><strong>Shared Secret (Optional):</strong></label><br/>
+      <input type="text" id="shared_secret" name="shared_secret" placeholder="Leave empty to auto-generate" style="width: 100%; padding: 0.5rem; margin-top: 0.25rem; border: 1px solid #ddd; border-radius: 4px; font-family: monospace;" />
+      <div class="muted">HMAC secret key (base64url encoded). If empty, a secret will be auto-generated.</div>
+    </div>
+    
+    <input type="hidden" name="csrf_token" value="{{ csrf }}" />
+    <div class="row">
+      <button type="submit">Add Agent</button>
+      <a href="/"><button type="button">Cancel</button></a>
+    </div>
+  </form>
+</div>
+
+{% if error %}
+<div class="card" style="border-color: #b00; background: #fee;">
+  <div class="danger"><strong>Error:</strong> {{ error }}</div>
+</div>
+{% endif %}
+
+{% endblock %}
+

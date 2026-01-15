@@ -36,12 +36,24 @@
       <div style="flex:1">
         <div><strong>{{ a.agent_id }}</strong></div>
         <div class="muted">URL: <code>{{ a.base_url }}</code></div>
+        {% if a.meta and a.meta.get("stacks") %}
+          <div class="muted">Stacks: {{ a.meta.get("stacks")|length }}</div>
+        {% endif %}
       </div>
-      <a href="/agent/{{ a.agent_id }}"><button type="button">Open</button></a>
+      <div class="row">
+        <a href="/agent/{{ a.agent_id }}"><button type="button">Open</button></a>
+        <button
+          hx-delete="/api/agents/{{ a.agent_id }}"
+          hx-headers='{"X-CSRF-Token":"{{ csrf }}"}'
+          hx-confirm="Are you sure you want to delete this agent?"
+          hx-target="closest .card"
+          hx-swap="outerHTML"
+          style="background: #fee; border-color: #b00; color: #b00;"
+        >
+          Delete
+        </button>
+      </div>
     </div>
-    {% if a.meta and a.meta.get("stacks") %}
-      <div class="muted">Stacks: {{ a.meta.get("stacks")|length }}</div>
-    {% endif %}
   </div>
 {% endfor %}
 

@@ -65,9 +65,7 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
     @app.on_event("startup")
     def _startup() -> None:
         registry.start()
-        # Run backup check every minute to support site-specific schedules
-        scheduler.add_job(backup_all_sites_flow, "cron", minute="*", args=[cx, registry, app.state.backups_root])
-        # Cleanup daily at 03:00
+        scheduler.add_job(backup_all_sites_flow, "cron", hour=2, minute=0, args=[cx, registry, app.state.backups_root])
         scheduler.add_job(retention_cleanup_all, "cron", hour=3, minute=0, args=[cx, app.state.backups_root])
         scheduler.start()
 
@@ -123,33 +121,29 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
         return templates.TemplateResponse("add_agent.html", {"request": request, "csrf": csrf, "active_page": "agents"})
 
     @app.post("/api/agents/add")
-    def agents_add(
-        request: Request, 
-        agent_name: str = Form(...), 
-        agent_id: str = Form(...), 
-        base_url: str = Form(...), 
-        shared_secret: str = Form(""), 
-        csrf_token: str = Form(...)
-    ) -> HTMLResponse:
+    def agents_add(request: Request, agent_id: str = Form(...), base_url: str = Form(...), shared_secret: str = Form(""), csrf_token: str = Form(...)) -> HTMLResponse:
         want = request.session.get("csrf")
         if not want or csrf_token != want:
             return templates.TemplateResponse("add_agent.html", {"request": request, "csrf": want or "", "error": "Invalid CSRF"})
-        if not agent_id or not base_url or not agent_name:
+        if not agent_id or not base_url:
             return templates.TemplateResponse("add_agent.html", {"request": request, "csrf": want, "error": "Required fields missing"})
         if not (base_url.startswith("http://") or base_url.startswith("https://")):
             return templates.TemplateResponse("add_agent.html", {"request": request, "csrf": want, "error": "Invalid URL"})
         
         secret = shared_secret.strip() if shared_secret.strip() else new_secret()
         try:
-            now = now_ts()
-            cx.execute(
-                "INSERT INTO agents(agent_id,agent_name,created_at,last_seen,base_url,shared_secret,meta_json) VALUES(?,?,?,?,?,?,?) ON CONFLICT(agent_id) DO UPDATE SET agent_name=excluded.agent_name, base_url=excluded.base_url, shared_secret=excluded.shared_secret, last_seen=excluded.last_seen",
-                (agent_id, agent_name.strip(), now, now, base_url, secret, json.dumps({})),
-            )
-            cx.commit()
+            if shared_secret.strip():
+                now = now_ts()
+                cx.execute(
+                    "INSERT INTO agents(agent_id,created_at,last_seen,base_url,shared_secret,meta_json) VALUES(?,?,?,?,?,?) ON CONFLICT(agent_id) DO UPDATE SET base_url=excluded.base_url, shared_secret=excluded.shared_secret, last_seen=excluded.last_seen",
+                    (agent_id, now, now, base_url, secret, json.dumps({})),
+                )
+                cx.commit()
+            else:
+                registry.upsert_agent(agent_id=agent_id, base_url=base_url, meta={})
             
             cx.execute("INSERT INTO audit_log(ts,actor,action,target,ok,detail_json) VALUES(?,?,?,?,?,?)",
-                      (now_ts(), "ui", "agent.add_manual", agent_id, 1, json.dumps({"base_url": base_url, "agent_name": agent_name})))
+                      (now_ts(), "ui", "agent.add_manual", agent_id, 1, json.dumps({"base_url": base_url})))
             cx.commit()
             return RedirectResponse("/agents", status_code=303)
         except Exception as e:
@@ -158,7 +152,7 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
     @app.get("/agents/{agent_id}", response_class=HTMLResponse)
     def agent_detail(agent_id: str, request: Request) -> HTMLResponse:
         csrf = ensure_csrf(request)
-        row = cx.execute("SELECT agent_id, agent_name, last_seen, base_url, meta_json FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        row = cx.execute("SELECT agent_id, last_seen, base_url, meta_json FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
         if not row:
             return templates.TemplateResponse("error.html", {"request": request, "message": "Unknown agent"})
         
@@ -177,12 +171,11 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
                     "stack": stack_name,
                 })
         
-        return templates.TemplateResponse("agent_detail.html", {
+        return templates.TemplateResponse("agent.html", {
             "request": request,
             "csrf": csrf,
             "agent": {
                 "agent_id": row["agent_id"],
-                "agent_name": row["agent_name"],
                 "hostname": meta.get("hostname", row["agent_id"]),
                 "base_url": row["base_url"],
                 "last_seen_formatted": last_seen_formatted,
@@ -247,7 +240,7 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
         
         # Get backups
         backup_rows = cx.execute(
-            "SELECT id, ts, backup_dir, manifest_json, rating, feedback FROM backups WHERE agent_id=? AND stack=? AND site=? ORDER BY ts DESC",
+            "SELECT id, ts, backup_dir, manifest_json FROM backups WHERE agent_id=? AND stack=? AND site=? ORDER BY ts DESC",
             (agent_id, stack, site)
         ).fetchall()
         
@@ -262,8 +255,6 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
                 "components": "database, files, private files",
                 "ok": manifest.get("ok", False),
                 "error": manifest.get("error", ""),
-                "rating": br["rating"],
-                "feedback": br["feedback"],
             })
         
         return templates.TemplateResponse("site_detail.html", {
@@ -340,14 +331,6 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
     def settings_page(request: Request) -> HTMLResponse:
         csrf = ensure_csrf(request)
         
-        # Get Telegram settings
-        telegram_row = cx.execute("SELECT bot_token, chat_id, enabled FROM telegram_settings WHERE id=1").fetchone()
-        telegram_settings = {
-            "bot_token": telegram_row["bot_token"] if telegram_row else "",
-            "chat_id": telegram_row["chat_id"] if telegram_row else "",
-            "enabled": bool(telegram_row["enabled"]) if telegram_row else False,
-        }
-        
         return templates.TemplateResponse("settings_page.html", {
             "request": request,
             "csrf": csrf,
@@ -357,26 +340,10 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
                 "retention_keep": kv_get(cx, "dashboard.retention_keep", 14),
                 "maintenance": kv_get(cx, "dashboard.maintenance", False),
             },
-            "telegram": telegram_settings,
             "active_page": "settings",
         })
 
     # API ENDPOINTS
-    @app.post("/api/agents/{agent_id}/rename")
-    async def rename_agent(agent_id: str, request: Request) -> JSONResponse:
-        payload = await request.json()
-        new_name = str(payload.get("name") or "").strip()
-        
-        if not new_name or len(new_name) > 50:
-            return JSONResponse({"ok": False, "error": "Invalid name"}, status_code=400)
-        
-        cx.execute("UPDATE agents SET agent_name=? WHERE agent_id=?", (new_name, agent_id))
-        cx.execute("INSERT INTO audit_log(ts,actor,action,target,ok,detail_json) VALUES(?,?,?,?,?,?)",
-                  (now_ts(), "ui", "agent.rename", agent_id, 1, json.dumps({"new_name": new_name})))
-        cx.commit()
-        
-        return JSONResponse({"ok": True, "name": new_name})
-    
     @app.post("/api/maintenance")
     def set_maintenance(request: Request, enabled: str = Form(...), csrf_token: str = Form(...)) -> RedirectResponse:
         want = request.session.get("csrf")
@@ -387,30 +354,6 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
         cx.execute("INSERT INTO audit_log(ts,actor,action,target,ok,detail_json) VALUES(?,?,?,?,?,?)",
                   (now_ts(), "ui", "maintenance", "dashboard", 1, json.dumps({"enabled": value})))
         cx.commit()
-        return RedirectResponse("/settings", status_code=303)
-    
-    @app.post("/api/settings/telegram")
-    def save_telegram_settings(
-        request: Request,
-        bot_token: str = Form(...),
-        chat_id: str = Form(...),
-        enabled: str = Form("0"),
-        csrf_token: str = Form(...)
-    ) -> RedirectResponse:
-        want = request.session.get("csrf")
-        if not want or csrf_token != want:
-            return RedirectResponse("/settings", status_code=303)
-        
-        is_enabled = enabled.lower() in {"1", "true", "yes", "on"}
-        
-        cx.execute(
-            "INSERT INTO telegram_settings(id,bot_token,chat_id,enabled) VALUES(1,?,?,?) ON CONFLICT(id) DO UPDATE SET bot_token=excluded.bot_token, chat_id=excluded.chat_id, enabled=excluded.enabled",
-            (bot_token.strip(), chat_id.strip(), int(is_enabled))
-        )
-        cx.execute("INSERT INTO audit_log(ts,actor,action,target,ok,detail_json) VALUES(?,?,?,?,?,?)",
-                  (now_ts(), "ui", "telegram.configure", "settings", 1, json.dumps({"enabled": is_enabled})))
-        cx.commit()
-        
         return RedirectResponse("/settings", status_code=303)
 
     @app.post("/api/sites/{agent_id}/{stack}/{site}/backup")
@@ -448,22 +391,6 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
         cx.commit()
         return JSONResponse({"ok": True})
 
-    @app.post("/api/backups/{backup_id}/rate")
-    async def rate_backup(backup_id: int, request: Request) -> JSONResponse:
-        payload = await request.json()
-        rating = int(payload.get("rating") or 0)
-        feedback = str(payload.get("feedback") or "").strip()
-        
-        if rating < 1 or rating > 5:
-            return JSONResponse({"ok": False, "error": "Invalid rating"}, status_code=400)
-        
-        cx.execute("UPDATE backups SET rating=?, feedback=? WHERE id=?", (rating, feedback, backup_id))
-        cx.execute("INSERT INTO audit_log(ts,actor,action,target,ok,detail_json) VALUES(?,?,?,?,?,?)",
-                  (now_ts(), "ui", "backup.rate", str(backup_id), 1, json.dumps({"rating": rating})))
-        cx.commit()
-        
-        return JSONResponse({"ok": True, "rating": rating})
-    
     @app.delete("/api/backups/{backup_id}")
     def delete_backup(backup_id: int, request: Request) -> JSONResponse:
         if not csrf_ok_header(request):
@@ -483,58 +410,6 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
                   (now_ts(), "ui", "backup.delete", f"{row['agent_id']}/{row['stack']}/{row['site']}", 1, json.dumps({"backup_id": backup_id})))
         cx.commit()
         return JSONResponse({"ok": True})
-
-    @app.get("/api/backups/{backup_id}/download")
-    def download_backup(backup_id: int, request: Request):
-        """
-        Download backup as a zip file.
-        """
-        from fastapi.responses import FileResponse
-        import zipfile
-        import tempfile
-        
-        row = cx.execute("SELECT id, backup_dir, agent_id, stack, site, manifest_json FROM backups WHERE id=?", (backup_id,)).fetchone()
-        if not row:
-            return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
-        
-        backup_dir = Path(row["backup_dir"])
-        if not backup_dir.exists():
-            return JSONResponse({"ok": False, "error": "backup_files_not_found"}, status_code=404)
-        
-        # Create temporary zip file
-        temp_zip = tempfile.NamedTemporaryFile(mode='wb', suffix='.zip', delete=False)
-        temp_zip.close()
-        
-        try:
-            files_added = []
-            with zipfile.ZipFile(temp_zip.name, 'w', zipfile.ZIP_DEFLATED) as zf:
-                for file_path in backup_dir.rglob('*'):
-                    if file_path.is_file():
-                        arcname = file_path.relative_to(backup_dir)
-                        zf.write(file_path, arcname)
-                        files_added.append(str(arcname))
-                        print(f"DEBUG: Added to zip: {arcname} ({file_path.stat().st_size} bytes)", flush=True)
-            
-            zip_size = Path(temp_zip.name).stat().st_size
-            print(f"DEBUG: Created zip file: {temp_zip.name} ({zip_size} bytes) with {len(files_added)} files", flush=True)
-            
-            # Log download
-            cx.execute("INSERT INTO audit_log(ts,actor,action,target,ok,detail_json) VALUES(?,?,?,?,?,?)",
-                      (now_ts(), "ui", "backup.download", f"{row['agent_id']}/{row['stack']}/{row['site']}", 1, json.dumps({"backup_id": backup_id, "files": files_added, "zip_size": zip_size})))
-            cx.commit()
-            
-            filename = f"backup-{row['site']}-{backup_id}.zip"
-            return FileResponse(
-                path=temp_zip.name,
-                media_type='application/zip',
-                filename=filename,
-                background=None  # Don't delete temp file automatically, will be cleaned up by OS
-            )
-        except Exception as e:
-            import os
-            if os.path.exists(temp_zip.name):
-                os.unlink(temp_zip.name)
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
     @app.post("/api/agents/{agent_id}/refresh")
     def refresh_agent(agent_id: str, request: Request) -> JSONResponse:
@@ -589,22 +464,6 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
 
         if not token or not agent_id or agent_port <= 0 or agent_port > 65535:
             return JSONResponse({"ok": False, "error": "bad_request"}, status_code=400)
-        
-        # Special handling for "reannounce" token (periodic re-registration)
-        if token == "reannounce":
-            # Check if agent already exists
-            row = cx.execute("SELECT agent_id FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
-            if not row:
-                return JSONResponse({"ok": False, "error": "not_registered"}, status_code=404)
-            
-            # Update existing agent (meta and last_seen via upsert)
-            base_url = f"http://{ip}:{agent_port}"
-            secret = registry.upsert_agent(agent_id=agent_id, base_url=base_url, meta=dict(meta))
-            
-            # Don't log every reannounce (too noisy), just update timestamp
-            return JSONResponse({"ok": True, "shared_secret": secret, "dashboard_ts": now_ts()})
-        
-        # Regular registration with token validation
         if not registry.claim_token(token=token, agent_id=agent_id, ip=ip):
             return JSONResponse({"ok": False, "error": "invalid_token"}, status_code=403)
 
@@ -616,42 +475,5 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
         cx.commit()
         return JSONResponse({"ok": True, "shared_secret": secret, "dashboard_ts": now_ts()})
 
-    @app.get("/api/server-time")
-    def get_server_time() -> JSONResponse:
-        """Get current server time"""
-        import time
-        return JSONResponse({
-            "timestamp": now_ts(),
-            "datetime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
-            "timezone": time.strftime("%Z")
-        })
-    
-    @app.get("/api/notifications")
-    def get_notifications() -> JSONResponse:
-        """Get recent notifications"""
-        rows = cx.execute(
-            "SELECT id, ts, type, title, message, is_read FROM notifications ORDER BY ts DESC LIMIT 50"
-        ).fetchall()
-        
-        notifications = []
-        for row in rows:
-            notifications.append({
-                "id": row["id"],
-                "ts": row["ts"],
-                "type": row["type"],
-                "title": row["title"],
-                "message": row["message"],
-                "is_read": bool(row["is_read"]),
-            })
-        
-        return JSONResponse({"notifications": notifications})
-    
-    @app.post("/api/notifications/mark-read")
-    def mark_notifications_read() -> JSONResponse:
-        """Mark all notifications as read"""
-        cx.execute("UPDATE notifications SET is_read=1 WHERE is_read=0")
-        cx.commit()
-        return JSONResponse({"ok": True})
-    
     return app
 

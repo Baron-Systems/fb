@@ -4,24 +4,437 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-    <title>fb</title>
+    <title>Backup Dashboard</title>
     <style>
-      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 2rem; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { 
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; 
+        background: #fafafa;
+        color: #222;
+      }
+      
+      /* Top Bar */
+      .topbar {
+        background: #fff;
+        border-bottom: 1px solid #ddd;
+        height: 56px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 2rem;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 100;
+      }
+      .topbar-title { font-size: 1.1rem; font-weight: 600; }
+      .topbar-status { 
+        display: flex; 
+        align-items: center; 
+        gap: 1rem;
+        color: #666;
+        font-size: 0.9rem;
+      }
+      .status-indicator { 
+        display: inline-block; 
+        width: 8px; 
+        height: 8px; 
+        border-radius: 50%; 
+        margin-right: 0.25rem;
+      }
+      .status-running { background: #0a0; }
+      .status-paused { background: #fa0; }
+      
+      /* Sidebar */
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: 56px;
+        bottom: 0;
+        width: 220px;
+        background: #fff;
+        border-right: 1px solid #ddd;
+        padding: 1rem 0;
+      }
+      .nav-item {
+        display: block;
+        padding: 0.75rem 1.5rem;
+        color: #444;
+        text-decoration: none;
+        border-left: 3px solid transparent;
+        transition: all 0.2s;
+      }
+      .nav-item:hover {
+        background: #f5f5f5;
+        color: #000;
+      }
+      .nav-item.active {
+        background: #f0f7ff;
+        color: #0066cc;
+        border-left-color: #0066cc;
+        font-weight: 500;
+      }
+      
+      /* Main Content */
+      .main-content {
+        margin-left: 220px;
+        margin-top: 56px;
+        padding: 2rem;
+        min-height: calc(100vh - 56px);
+      }
+      
+      /* Page Header */
+      .page-header {
+        margin-bottom: 2rem;
+      }
+      .page-title {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+      }
+      .page-subtitle {
+        color: #666;
+        font-size: 0.9rem;
+      }
+      
+      /* Cards & Tables */
+      .card {
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+      .card-header {
+        font-weight: 600;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid #eee;
+      }
+      
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      thead {
+        background: #f8f9fa;
+        border-bottom: 2px solid #ddd;
+      }
+      th {
+        text-align: left;
+        padding: 0.75rem 1rem;
+        font-weight: 600;
+        font-size: 0.85rem;
+        color: #555;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      td {
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid #eee;
+      }
+      tbody tr:last-child td {
+        border-bottom: none;
+      }
+      tbody tr:hover {
+        background: #f8f9fa;
+      }
+      
+      /* Buttons */
+      button, .btn {
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+        border: 1px solid #ddd;
+        background: #fff;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: all 0.2s;
+        text-decoration: none;
+        display: inline-block;
+        color: #333;
+      }
+      button:hover, .btn:hover {
+        background: #f5f5f5;
+        border-color: #aaa;
+      }
+      .btn-primary {
+        background: #0066cc;
+        color: #fff;
+        border-color: #0066cc;
+      }
+      .btn-primary:hover {
+        background: #0052a3;
+        border-color: #0052a3;
+      }
+      .btn-danger {
+        background: #fff;
+        color: #c00;
+        border-color: #c00;
+      }
+      .btn-danger:hover {
+        background: #fee;
+      }
+      
+      /* Status Badges */
+      .status-badge {
+        display: inline-block;
+        padding: 0.25rem 0.6rem;
+        border-radius: 3px;
+        font-size: 0.8rem;
+        font-weight: 500;
+      }
+      .status-online { background: #d4f4dd; color: #0a5a1f; }
+      .status-offline { background: #fee; color: #c00; }
+      .status-success { background: #d4f4dd; color: #0a5a1f; }
+      .status-failed { background: #fee; color: #c00; }
+      .status-enabled { background: #e3f2fd; color: #0052a3; }
+      .status-disabled { background: #f5f5f5; color: #666; }
+      
+      /* Utilities */
       .row { display: flex; gap: 1rem; align-items: center; }
-      .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+      .row-between { justify-content: space-between; }
       .muted { color: #666; font-size: 0.9rem; }
-      button { padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid #ccc; background: #fafafa; cursor: pointer; }
-      code { background: #f5f5f5; padding: 0.1rem 0.3rem; border-radius: 4px; }
-      .danger { color: #b00; }
+      code { background: #f5f5f5; padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.9em; }
+      .text-right { text-align: right; }
+      .empty-state {
+        text-align: center;
+        padding: 3rem 2rem;
+        color: #999;
+      }
+      
+      /* HTMX Indicator */
+      .htmx-indicator { display: none; }
+      .htmx-request .htmx-indicator { display: inline; }
+      .htmx-request.htmx-indicator { display: inline; }
     </style>
   </head>
   <body>
-    <div class="row">
-      <h2 style="margin:0">fb</h2>
-      <span class="muted">Backup Dashboard</span>
+    <!-- Top Bar -->
+    <div class="topbar">
+      <div class="topbar-title">💾 Backup Dashboard</div>
+      <div class="topbar-status">
+        <span id="server-time" style="margin-right: 1rem; font-weight: 600;">⏰ Loading...</span>
+        <span>•</span>
+        <span>
+          <span class="status-indicator status-running"></span>
+          Scheduler Running
+        </span>
+        <span>•</span>
+        <div class="notification-bell" onclick="toggleNotifications()" style="position: relative; cursor: pointer; font-size: 1.3rem; padding: 0.5rem; border-radius: 50%; transition: background 0.3s;">
+          🔔
+          <span class="notification-badge" id="notif-badge" style="display: none; position: absolute; top: 0; right: 0; background: #dc3545; color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; font-weight: bold;">0</span>
+        </div>
+      </div>
     </div>
-    <hr />
-    {% block content %}{% endblock %}
+    
+    <!-- Notifications Panel -->
+    <div id="notifications-panel" style="display: none; position: fixed; top: 60px; right: 20px; width: 350px; max-height: 500px; overflow-y: auto; background: white; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000;">
+      <div style="padding: 1rem; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+        <strong>Notifications</strong>
+        <button onclick="markAllAsRead()" style="background: none; border: none; color: #0066cc; cursor: pointer; font-size: 0.9rem;">Mark all read</button>
+      </div>
+      <div id="notifications-list" style="max-height: 400px; overflow-y: auto;">
+        <!-- Notifications will be loaded here -->
+      </div>
+    </div>
+    
+    <script>
+      // Update server time every second
+      function updateServerTime() {
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const dateStr = now.toLocaleDateString('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit' });
+        document.getElementById('server-time').textContent = `⏰ ${dateStr} ${timeStr}`;
+      }
+      
+      updateServerTime();
+      setInterval(updateServerTime, 1000);
+      
+      // Notifications system
+      function toggleNotifications() {
+        const panel = document.getElementById('notifications-panel');
+        if (panel.style.display === 'none') {
+          panel.style.display = 'block';
+          loadNotifications();
+        } else {
+          panel.style.display = 'none';
+        }
+      }
+      
+      function loadNotifications() {
+        fetch('/api/notifications')
+          .then(r => r.json())
+          .then(data => {
+            const list = document.getElementById('notifications-list');
+            const badge = document.getElementById('notif-badge');
+            
+            if (data.notifications && data.notifications.length > 0) {
+              const unread = data.notifications.filter(n => !n.is_read).length;
+              badge.textContent = unread;
+              badge.style.display = unread > 0 ? 'flex' : 'none';
+              
+              list.innerHTML = data.notifications.map(n => `
+                <div style="padding: 1rem; border-bottom: 1px solid #eee; ${n.is_read ? 'opacity: 0.6;' : 'background: #f0f7ff;'}">
+                  <div style="font-weight: 600; margin-bottom: 0.25rem;">${n.type === 'success' ? '✅' : '❌'} ${n.title}</div>
+                  <div style="font-size: 0.9rem; color: #666;">${n.message}</div>
+                  <div style="font-size: 0.8rem; color: #999; margin-top: 0.5rem;">${new Date(n.ts * 1000).toLocaleString()}</div>
+                </div>
+              `).join('');
+            } else {
+              list.innerHTML = '<div style="padding: 2rem; text-align: center; color: #999;">No notifications</div>';
+              badge.style.display = 'none';
+            }
+          })
+          .catch(e => console.error('Failed to load notifications:', e));
+      }
+      
+      function markAllAsRead() {
+        fetch('/api/notifications/mark-read', { method: 'POST' })
+          .then(() => loadNotifications())
+          .catch(e => console.error('Failed to mark as read:', e));
+      }
+      
+      // Auto-refresh notifications every 30 seconds
+      setInterval(loadNotifications, 30000);
+      loadNotifications();
+      
+      // Toast notification system
+      function showToast(message, type = 'success') {
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.style.cssText = `
+          position: fixed;
+          top: 80px;
+          right: 20px;
+          background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
+          color: white;
+          padding: 1rem 1.5rem;
+          border-radius: 8px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          z-index: 10000;
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          min-width: 300px;
+          max-width: 500px;
+          animation: slideIn 0.3s ease-out;
+        `;
+        
+        const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
+        toast.innerHTML = `
+          <span style="font-size: 1.5rem;">${icon}</span>
+          <span style="flex: 1;">${message}</span>
+          <button onclick="this.parentElement.remove()" style="background: none; border: none; color: white; cursor: pointer; font-size: 1.2rem; padding: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">×</button>
+        `;
+        
+        document.body.appendChild(toast);
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+          toast.style.animation = 'slideOut 0.3s ease-out';
+          setTimeout(() => toast.remove(), 300);
+        }, 5000);
+      }
+      
+      // Listen for HTMX events to show toasts
+      document.body.addEventListener('htmx:afterRequest', function(event) {
+        const path = event.detail.path || '';
+        const xhr = event.detail.xhr;
+        
+        // Backup operations
+        if (path.includes('/backup')) {
+          if (xhr && xhr.status === 200) {
+            try {
+              const data = JSON.parse(xhr.responseText);
+              if (data.ok) {
+                showToast('✅ Backup completed successfully!', 'success');
+              } else {
+                showToast('❌ Backup failed: ' + (data.error || 'Unknown error'), 'error');
+              }
+            } catch (e) {
+              if (xhr.status === 200) {
+                showToast('✅ Backup operation completed!', 'success');
+              }
+            }
+          } else if (xhr && xhr.status !== 200) {
+            showToast('❌ Backup failed. Please try again.', 'error');
+          }
+        }
+        
+        // Delete operations
+        if (path.includes('/delete') || (event.detail.elt && event.detail.elt.hasAttribute('hx-delete'))) {
+          if (xhr && xhr.status === 200) {
+            showToast('🗑️ Item deleted successfully', 'success');
+          }
+        }
+        
+        // Schedule operations
+        if (path.includes('/schedule')) {
+          if (xhr && xhr.status === 200 || xhr.status === 303) {
+            showToast('📅 Schedule updated successfully', 'success');
+          }
+        }
+        
+        // Agent refresh
+        if (path.includes('/refresh')) {
+          if (xhr && xhr.status === 200) {
+            showToast('🔄 Agent refreshed successfully', 'success');
+          }
+        }
+      });
+      
+      // Listen for successful swaps (for delete operations)
+      document.body.addEventListener('htmx:afterSwap', function(event) {
+        const target = event.detail.target;
+        if (target && target.tagName === 'TR' && target.style.display === 'none') {
+          // Row was deleted
+          showToast('🗑️ Backup deleted successfully', 'success');
+        }
+      });
+    </script>
+    
+    <style>
+      @keyframes slideIn {
+        from {
+          transform: translateX(400px);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+      
+      @keyframes slideOut {
+        from {
+          transform: translateX(0);
+          opacity: 1;
+        }
+        to {
+          transform: translateX(400px);
+          opacity: 0;
+        }
+      }
+    </style>
+    
+    <!-- Sidebar -->
+    <nav class="sidebar">
+      <a href="/agents" class="nav-item {% if active_page == 'agents' %}active{% endif %}">Agents</a>
+      <a href="/sites" class="nav-item {% if active_page == 'sites' %}active{% endif %}">Sites</a>
+      <a href="/backups" class="nav-item {% if active_page == 'backups' %}active{% endif %}">Backups</a>
+      <a href="/audit-logs" class="nav-item {% if active_page == 'audit' %}active{% endif %}">Audit Logs</a>
+      <a href="/settings" class="nav-item {% if active_page == 'settings' %}active{% endif %}">Settings</a>
+    </nav>
+    
+    <!-- Main Content -->
+    <div class="main-content">
+      {% block content %}{% endblock %}
+    </div>
   </body>
 </html>
 

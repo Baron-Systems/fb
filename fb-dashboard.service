@@ -1,0 +1,21 @@
+[Unit]
+Description=Frappe Manager Backup Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root
+ExecStart=/usr/local/bin/fb run
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

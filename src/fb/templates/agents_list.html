@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1 class="page-title">Agents</h1>
+  <p class="page-subtitle">Production servers running backup agents</p>
+</div>
+
+<div class="card">
+  <div class="row row-between" style="margin-bottom: 1rem;">
+    <div><strong>{{ agents|length }}</strong> agent(s) registered</div>
+    <a href="/agents/add" class="btn btn-primary">Add Agent</a>
+  </div>
+</div>
+
+{% if agents|length == 0 %}
+<div class="card empty-state">
+  <div style="font-size: 2rem; margin-bottom: 1rem;">📡</div>
+  <div>No agents registered yet.</div>
+  <div class="muted">Start agents with <code>fb-agent run</code>. They will auto-announce on the LAN.</div>
+</div>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Agent Name</th>
+      <th>Hostname</th>
+      <th>Status</th>
+      <th>Server Time</th>
+      <th>Last Seen</th>
+      <th>Sites</th>
+      <th class="text-right">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for agent in agents %}
+    <tr>
+      <td>
+        <strong id="agent-name-{{ agent.agent_id }}">{{ agent.display_name }}</strong>
+        <div class="muted" style="font-size: 0.8rem;">ID: {{ agent.agent_id[:16] }}...</div>
+      </td>
+      <td><code>{{ agent.hostname }}</code></td>
+      <td>
+        {% if agent.is_online %}
+          <span class="status-badge status-online">Online</span>
+        {% else %}
+          <span class="status-badge status-offline">Offline</span>
+        {% endif %}
+      </td>
+      <td>
+        <span id="agent-time-{{ agent.agent_id }}" class="muted" style="font-weight: 600;">⏰ --:--:--</span>
+      </td>
+      <td class="muted">{{ agent.last_seen_formatted }}</td>
+      <td>{{ agent.site_count }}</td>
+      <td class="text-right">
+        <a href="/agents/{{ agent.agent_id }}" class="btn">View</a>
+        <button
+          hx-delete="/api/agents/{{ agent.agent_id }}"
+          hx-headers='{"X-CSRF-Token":"{{ csrf }}"}'
+          hx-confirm="Delete this agent?"
+          hx-target="closest tr"
+          hx-swap="outerHTML"
+          class="btn btn-danger"
+        >
+          Delete
+        </button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<script>
+  // Update agent times every 10 seconds
+  const agents = [
+    {% for agent in agents %}
+    { id: '{{ agent.agent_id }}', url: '{{ agent.base_url }}' },
+    {% endfor %}
+  ];
+  
+  async function updateAgentTime(agent) {
+    try {
+      const response = await fetch(agent.url + '/api/time', {
+        mode: 'cors',
+        cache: 'no-cache'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const elem = document.getElementById('agent-time-' + agent.id);
+        if (elem) {
+          // Extract time part (HH:MM:SS)
+          const timePart = data.datetime.split(' ')[1];
+          elem.textContent = '⏰ ' + timePart;
+          elem.style.color = '#2c974b';
+        }
+      } else {
+        throw new Error('HTTP ' + response.status);
+      }
+    } catch (e) {
+      const elem = document.getElementById('agent-time-' + agent.id);
+      if (elem) {
+        elem.textContent = '⚠️ Error: ' + e.message;
+        elem.style.color = '#dc3545';
+      }
+    }
+  }
+  
+  function updateAllAgentTimes() {
+    agents.forEach(agent => updateAgentTime(agent));
+  }
+  
+  // Initial update
+  updateAllAgentTimes();
+  
+  // Update every 10 seconds
+  setInterval(updateAllAgentTimes, 10000);
+</script>
+
+{% endblock %}
+

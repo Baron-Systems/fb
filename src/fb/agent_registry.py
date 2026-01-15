@@ -137,7 +137,7 @@ class AgentRegistry:
         Returns the shared_secret (created once and persisted).
         """
         now = now_ts()
-        row = self._cx.execute("SELECT shared_secret FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        row = self._cx.execute("SELECT shared_secret, agent_name FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
         if row:
             secret = row["shared_secret"]
             self._cx.execute(
@@ -146,9 +146,11 @@ class AgentRegistry:
             )
         else:
             secret = new_secret()
+            # Use hostname from meta as agent_name if available
+            agent_name = meta.get("hostname", agent_id[:12])
             self._cx.execute(
-                "INSERT INTO agents(agent_id,created_at,last_seen,base_url,shared_secret,meta_json) VALUES(?,?,?,?,?,?)",
-                (agent_id, now, now, base_url, secret, json.dumps(meta)),
+                "INSERT INTO agents(agent_id,agent_name,created_at,last_seen,base_url,shared_secret,meta_json) VALUES(?,?,?,?,?,?,?)",
+                (agent_id, agent_name, now, now, base_url, secret, json.dumps(meta)),
             )
         self._cx.commit()
         return secret
