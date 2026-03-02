@@ -116,7 +116,7 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
         next_path = request.query_params.get("next", "/agents")
         return templates.TemplateResponse("login.html", {"request": request, "next": next_path})
 
-    @app.post("/login", response_class=HTMLResponse)
+    @app.post("/login", response_class=HTMLResponse, response_model=None)
     def login_submit(request: Request, password: str = Form(""), next_path: str = Form("/agents")) -> RedirectResponse | HTMLResponse:
         want = request.app.state.dashboard_password
         if password.strip() == want:
