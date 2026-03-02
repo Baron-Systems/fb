@@ -111,6 +111,155 @@ sudo ufw allow 7310/udp
 sudo ufw allow from <dashboard_ip> to any port 8888 proto tcp
 ```
 
+## Cloudflare Tunnel (Optional)
+
+Use Cloudflare Tunnel to expose Dashboard and Agent behind NAT without opening ports. Replace `example.com` with your domain (e.g. `mby-solution.vip`).
+
+### 1) Install cloudflared (on each server, Ubuntu/Debian)
+
+```bash
+wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared-linux-amd64.deb
+cloudflared --version
+```
+
+### 2) Login to Cloudflare (once per server)
+
+```bash
+cloudflared tunnel login
+```
+
+Open the link in browser and authorize your domain (e.g. `mby-solution.vip`).
+
+### 3) Dashboard server – create tunnel
+
+```bash
+cloudflared tunnel create fb-dashboard
+cloudflared tunnel route dns fb-dashboard dashboard.example.com
+```
+
+Create config (replace `<TUNNEL_UUID>.json` with the file from `~/.cloudflared/` after `tunnel create`):
+
+```bash
+sudo mkdir -p /etc/cloudflared
+sudo tee /etc/cloudflared/config.yml > /dev/null <<'EOF'
+tunnel: fb-dashboard
+credentials-file: /home/frappe/.cloudflared/<TUNNEL_UUID>.json
+ingress:
+  - hostname: dashboard.example.com
+    service: http://127.0.0.1:7311
+  - service: http_status:404
+EOF
+```
+
+Run as service:
+
+```bash
+sudo cloudflared service install
+sudo systemctl enable --now cloudflared
+sudo systemctl status cloudflared
+```
+
+### 4) Agent server – create tunnel
+
+```bash
+cloudflared tunnel create fb-agent
+cloudflared tunnel route dns fb-agent agent1.example.com
+```
+
+Create config:
+
+```bash
+sudo mkdir -p /etc/cloudflared
+sudo tee /etc/cloudflared/config.yml > /dev/null <<'EOF'
+tunnel: fb-agent
+credentials-file: /home/frappe/.cloudflared/<TUNNEL_UUID>.json
+ingress:
+  - hostname: agent1.example.com
+    service: http://127.0.0.1:8888
+  - service: http_status:404
+EOF
+```
+
+Run as service:
+
+```bash
+sudo cloudflared service install
+sudo systemctl enable --now cloudflared
+sudo systemctl status cloudflared
+```
+
+### 5) Use Cloudflare URLs in fb / fb-agent
+
+On the **Agent** server, set (or add to `fb-agent.service`):
+
+```bash
+Environment="FB_DASHBOARD_URL=https://dashboard.example.com"
+Environment="FB_AGENT_BASE_URL=https://agent1.example.com"
+```
+
+Then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart fb-agent
+```
+
+### 6) Second Agent (e.g. agent2.example.com)
+
+On the second server:
+
+```bash
+cloudflared tunnel create fb-agent-2
+cloudflared tunnel route dns fb-agent-2 agent2.example.com
+```
+
+Config:
+
+```bash
+sudo mkdir -p /etc/cloudflared
+sudo tee /etc/cloudflared/config.yml > /dev/null <<'EOF'
+tunnel: fb-agent-2
+credentials-file: /home/frappe/.cloudflared/<TUNNEL_UUID>.json
+ingress:
+  - hostname: agent2.example.com
+    service: http://127.0.0.1:8888
+  - service: http_status:404
+EOF
+```
+
+```bash
+sudo cloudflared service install
+sudo systemctl enable --now cloudflared
+```
+
+In `fb-agent.service` on that server:
+
+```bash
+Environment="FB_DASHBOARD_URL=https://dashboard.example.com"
+Environment="FB_AGENT_BASE_URL=https://agent2.example.com"
+```
+
+### 7) Useful Cloudflare commands
+
+```bash
+# Logs
+sudo journalctl -u cloudflared -f
+
+# Restart
+sudo systemctl restart cloudflared
+
+# List credentials (to get <TUNNEL_UUID>.json name)
+ls /home/frappe/.cloudflared/*.json
+```
+
+### 8) Quick test
+
+```bash
+curl -I https://dashboard.example.com
+curl -I https://agent1.example.com/api/time
+```
+
 ## Upgrade
 
 ```bash

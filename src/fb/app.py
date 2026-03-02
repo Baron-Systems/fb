@@ -4,11 +4,13 @@ import json
 import time as time_module
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
 
@@ -31,10 +33,35 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
         session_secret = new_secret()
         kv_set(cx, "dashboard.session_secret", session_secret)
 
+    # Dashboard password (stored in KV; set once to default if missing)
+    _stored_password = kv_get(cx, "dashboard.password")
+    if not isinstance(_stored_password, str):
+        kv_set(cx, "dashboard.password", "YTMG3-N6DKC-DKB77-7M9GH-8HVX7")
+    dashboard_password = kv_get(cx, "dashboard.password") or "YTMG3-N6DKC-DKB77-7M9GH-8HVX7"
+
     templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
     app = FastAPI(title="Backup Dashboard", version=__version__)
+
+    class DashboardAuthMiddleware(BaseHTTPMiddleware):
+        """Require session['authenticated'] for all routes except /login and /static and POST /api/agents/register."""
+        async def dispatch(self, request: Request, call_next):
+            path = request.url.path
+            if path == "/login" or path.startswith("/static/") or (path == "/api/agents/register" and request.method == "POST"):
+                return await call_next(request)
+            if request.session.get("authenticated") is True:
+                return await call_next(request)
+            if "text/html" in (request.headers.get("accept") or ""):
+                next_url = request.url.path
+                if request.url.query:
+                    next_url += "?" + request.url.query
+                return RedirectResponse(url="/login?next=" + quote(next_url, safe=""), status_code=303)
+            return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+
+    app.add_middleware(DashboardAuthMiddleware)
     app.add_middleware(SessionMiddleware, secret_key=session_secret)
+
+    app.state.dashboard_password = dashboard_password
 
     static_dir = Path(__file__).parent / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
@@ -82,6 +109,29 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def root_redirect() -> RedirectResponse:
         return RedirectResponse("/agents", status_code=303)
+
+    # LOGIN / LOGOUT
+    @app.get("/login", response_class=HTMLResponse)
+    def login_page(request: Request) -> HTMLResponse:
+        next_path = request.query_params.get("next", "/agents")
+        return templates.TemplateResponse("login.html", {"request": request, "next": next_path})
+
+    @app.post("/login", response_class=HTMLResponse)
+    def login_submit(request: Request, password: str = Form(""), next_path: str = Form("/agents")) -> RedirectResponse | HTMLResponse:
+        want = request.app.state.dashboard_password
+        if password.strip() == want:
+            request.session["authenticated"] = True
+            return RedirectResponse(next_path if (next_path and next_path.startswith("/")) else "/agents", status_code=303)
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "next": next_path or "/agents",
+            "error": "كلمة المرور غير صحيحة",
+        })
+
+    @app.get("/logout")
+    def logout(request: Request) -> RedirectResponse:
+        request.session.clear()
+        return RedirectResponse("/login", status_code=303)
 
     # AGENTS
     @app.get("/agents", response_class=HTMLResponse)
