@@ -629,12 +629,14 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
         # Special handling for "reannounce" token (periodic re-registration)
         if token == "reannounce":
             # Check if agent already exists
-            row = cx.execute("SELECT agent_id FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+            row = cx.execute("SELECT agent_id, base_url FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
             if not row:
                 return JSONResponse({"ok": False, "error": "not_registered"}, status_code=404)
             
-            # Update existing agent (meta and last_seen via upsert)
-            base_url = f"http://{ip}:{agent_port}"
+            # Preserve manually configured base_url for existing agents.
+            # This avoids replacing a reachable address (e.g. Tailscale IP)
+            # with request-derived values like 127.0.0.1 from tunnels/proxies.
+            base_url = str(row["base_url"] or "").strip() or f"http://{ip}:{agent_port}"
             secret = registry.upsert_agent(agent_id=agent_id, base_url=base_url, meta=dict(meta))
             
             # Don't log every reannounce (too noisy), just update timestamp
@@ -644,7 +646,14 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
         if not registry.claim_token(token=token, agent_id=agent_id, ip=ip):
             return JSONResponse({"ok": False, "error": "invalid_token"}, status_code=403)
 
-        base_url = f"http://{ip}:{agent_port}"
+        existing_row = cx.execute("SELECT base_url FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        # Preserve existing base_url for manually added agents.
+        # For first-time auto registration, fall back to request-derived URL.
+        base_url = (
+            str(existing_row["base_url"] or "").strip()
+            if existing_row
+            else ""
+        ) or f"http://{ip}:{agent_port}"
         secret = registry.upsert_agent(agent_id=agent_id, base_url=base_url, meta=dict(meta))
 
         cx.execute("INSERT INTO audit_log(ts,actor,action,target,ok,detail_json) VALUES(?,?,?,?,?,?)",
