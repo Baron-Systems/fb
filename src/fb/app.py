@@ -626,20 +626,28 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
         if not token or not agent_id or agent_port <= 0 or agent_port > 65535:
             return JSONResponse({"ok": False, "error": "bad_request"}, status_code=400)
         
-        # Special handling for "reannounce" token (periodic re-registration)
+        # Special handling for "reannounce" token (periodic re-registration).
+        # When using a fixed dashboard URL (no UDP discovery), allow bootstrap
+        # auto-registration on first contact as well.
         if token == "reannounce":
-            # Check if agent already exists
             row = cx.execute("SELECT agent_id, base_url FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
-            if not row:
-                return JSONResponse({"ok": False, "error": "not_registered"}, status_code=404)
-            
             # Preserve manually configured base_url for existing agents.
-            # This avoids replacing a reachable address (e.g. Tailscale IP)
-            # with request-derived values like 127.0.0.1 from tunnels/proxies.
-            base_url = str(row["base_url"] or "").strip() or f"http://{ip}:{agent_port}"
+            # For first contact, use request-derived URL.
+            base_url = (
+                str(row["base_url"] or "").strip()
+                if row
+                else ""
+            ) or f"http://{ip}:{agent_port}"
             secret = registry.upsert_agent(agent_id=agent_id, base_url=base_url, meta=dict(meta))
-            
-            # Don't log every reannounce (too noisy), just update timestamp
+
+            # Don't log every reannounce (too noisy). Log only first bootstrap.
+            if not row:
+                cx.execute(
+                    "INSERT INTO audit_log(ts,actor,action,target,ok,detail_json) VALUES(?,?,?,?,?,?)",
+                    (now_ts(), "agent", "register.bootstrap", agent_id, 1, json.dumps({"ip": ip, "port": agent_port})),
+                )
+                cx.commit()
+
             return JSONResponse({"ok": True, "shared_secret": secret, "dashboard_ts": now_ts()})
         
         # Regular registration with token validation
