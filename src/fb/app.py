@@ -87,7 +87,7 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
     @app.get("/agents", response_class=HTMLResponse)
     def agents_list(request: Request) -> HTMLResponse:
         csrf = ensure_csrf(request)
-        rows = cx.execute("SELECT agent_id, last_seen, base_url, meta_json FROM agents ORDER BY agent_id").fetchall()
+        rows = cx.execute("SELECT agent_id, agent_name, last_seen, base_url, meta_json FROM agents ORDER BY agent_id").fetchall()
         
         agents = []
         for row in rows:
@@ -102,6 +102,7 @@ def create_app(*, db_path: Path, bind_host: str, bind_port: int) -> FastAPI:
             
             agents.append({
                 "agent_id": row["agent_id"],
+                "display_name": row["agent_name"] or hostname,
                 "hostname": hostname,
                 "base_url": row["base_url"],
                 "last_seen": last_seen_ts,
