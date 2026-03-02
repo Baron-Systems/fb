@@ -4,9 +4,11 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/root
-ExecStart=/usr/local/bin/fb run
+User=frappe
+WorkingDirectory=/home/frappe
+# pipx installs to ~/.local/bin; ensure PATH includes it
+Environment="PATH=/home/frappe/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/home/frappe/.local/bin/fb run
 Restart=always
 RestartSec=10
 StandardOutput=journal

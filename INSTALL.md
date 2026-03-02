@@ -315,6 +315,36 @@ sudo ln -s /path/to/fm /usr/local/bin/fm
 3. Check Agent logs for errors
 4. Check Dashboard audit logs in UI
 
+### 502 Bad Gateway (Dashboard behind Cloudflare Tunnel)
+
+If the Dashboard URL returns **502** and `systemctl status fb-dashboard` shows **restart counter** increasing:
+
+1. **Check why the process exits** (run on the Dashboard server):
+   ```bash
+   sudo journalctl -u fb-dashboard -n 80 --no-pager
+   ```
+   Look for Python tracebacks or "Address already in use".
+
+2. **Service must run as the same user that installed fb.** If you installed with `pipx install ...` as user `frappe`, the systemd service should use `User=frappe` and `ExecStart=/home/frappe/.local/bin/fb run`. If the service file uses `User=root` and `/usr/local/bin/fb`, either:
+   - Install fb for root: `sudo pipx install git+https://github.com/Baron-Systems/fb.git` and keep `User=root`, or
+   - Use the provided `fb-dashboard.service` that runs as `frappe` and uses `/home/frappe/.local/bin/fb run`.
+
+3. **Reload and restart** after editing the service file:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl restart fb-dashboard
+   sudo systemctl status fb-dashboard
+   ```
+   If it stays **active (running)** without the restart counter increasing, wait a few seconds then try https://dashboard.mby-solution.vip/ again.
+
+4. **Verify port 7311** is listening (as the same user that runs the service):
+   ```bash
+   sudo ss -tlnp | grep 7311
+   # or
+   curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:7311/
+   ```
+   Expect `200` or `302` from curl.
+
 ## Support
 
 For issues, please visit: https://github.com/Baron-Systems/fb/issues
